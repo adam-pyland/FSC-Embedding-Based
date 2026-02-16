@@ -1,0 +1,7 @@
+filename,prediction,is_inlier,is_outlier,decision_score
+0000007_04999_d_00000365_features.npy,-1,False,True,-0.32200459870203324
+0000204_00000_d_000019123_features.npy,1,True,False,0.012890984973616681
+0000352_04705_d_000056326_features.npy,1,True,False,0.023595066866757886
+9999937_00000_d_00002213_features.npy,-1,False,True,-0.10538789194803772
+pickuptruck2_292_features.npy,-1,False,True,-0.05923080244079232
+pickuptruck3_662_features.npy,-1,False,True,-0.0925523180592176
