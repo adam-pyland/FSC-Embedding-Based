@@ -1,2 +1,7 @@
 ultralytics/
 venv310/
+Input_Images/
+Original_Code_Results/
+Results_with_SAHI/
+models/
+runs/
