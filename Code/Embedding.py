@@ -9,8 +9,8 @@ def main():
     # -------------------------------------------------------------------------
     # Configuration
     # -------------------------------------------------------------------------
-    input_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/Original_Novel_Class_Img_Crops'
-    output_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/DINO_FAIR1M_features/novel_classes'
+    input_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/Original_Base_Class_Img_Crops'
+    output_dir = 'home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/DINO_FAIR1M_features/base_classes'
     
     # Update this path to where you saved the satellite model
     checkpoint_path = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/models/dinov3_vitl16_pretrain_sat493m-eadcf0ff.pth'
