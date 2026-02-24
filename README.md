@@ -57,3 +57,9 @@ T-SNE-visualize-features.py
 └───Vehicles_Novel_Class
     - Full images of Validation.
 ```
+
+## Dataset
+The FAIR1M dataset is on the Boston Server:
+```
+/Data/Projects/Satellite/data/FAIR1M
+```
