@@ -6,8 +6,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 
 def check_embedding_separability():
-    base_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/DINO_FAIR1M_features/base_classes'
-    novel_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/DINO_FAIR1M_features/novel_classes'
+    base_dir = 'C:\Adams\FSOD\Codes\FSC-Embedding-Based\Input_images\Adapted_Features\base_test'
+    novel_dir = 'C:\Adams\FSOD\Codes\FSC-Embedding-Based\Input_images\Adapted_Features\novel_classes'
 
     all_classes = [
         'Small Car', 'Bus', 'Dump Truck', 'Van', 'Tractor', 

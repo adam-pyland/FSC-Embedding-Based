@@ -8,3 +8,9 @@ runs/
 Outputs/FAIR1M_Tiles_SAHI_17_2_26/
 Outputs/FAIR1M_Usual_Detector_17_2_26/
 Projects_Heavy_Folders.zip
+Outputs/YOLO26_Train_FAIR1M/
+TEMP.py
+
+*.jpg
+*.pt
+*.pth
