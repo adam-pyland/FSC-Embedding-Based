@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
+from sklearn.preprocessing import StandardScaler
 
 def check_embedding_separability():
     base_dir = 'C:\Adams\FSOD\Codes\FSC-Embedding-Based\Input_images\Adapted_Features\base_test'
@@ -45,13 +46,19 @@ def check_embedding_separability():
     # Split the data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
+    # Scale the data mathematically so the LR model can read it
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+
     # Train a simple linear classifier
     print("Training Logistic Regression...")
-    clf = LogisticRegression(max_iter=1000, class_weight='balanced')
-    clf.fit(X_train, y_train)
+    clf = LogisticRegression(max_iter=3000, class_weight='balanced')
+    clf.fit(X_train_scaled, y_train)
 
     # Predict and evaluate
-    y_pred = clf.predict(X_test)
+    y_pred = clf.predict(X_test_scaled)
     acc = accuracy_score(y_test, y_pred)
     
     print(f"\nOverall Accuracy: {acc * 100:.2f}%\n")
