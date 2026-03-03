@@ -5,10 +5,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
 
 def check_embedding_separability():
-    base_dir = 'C:\Adams\FSOD\Codes\FSC-Embedding-Based\Input_images\Adapted_Features\base_test'
-    novel_dir = 'C:\Adams\FSOD\Codes\FSC-Embedding-Based\Input_images\Adapted_Features\novel_classes'
+    base_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/DINO_FAIR1M_features/base_classes'
+    novel_dir = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Input_Images/DINO_FAIR1M_features/novel_classes'
 
     all_classes = [
         'Small Car', 'Bus', 'Dump Truck', 'Van', 'Tractor', 
@@ -54,7 +55,11 @@ def check_embedding_separability():
 
     # Train a simple linear classifier
     print("Training Logistic Regression...")
-    clf = LogisticRegression(max_iter=3000, class_weight='balanced')
+    # ====================================================================
+    # The Separation algorthims options
+    # clf = LogisticRegression(max_iter=3000, class_weight='balanced')
+    clf = MLPClassifier(hidden_layer_sizes=(512, 256), max_iter=500, random_state=42)
+    # ====================================================================
     clf.fit(X_train_scaled, y_train)
 
     # Predict and evaluate

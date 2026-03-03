@@ -19,6 +19,7 @@ Projects_Heavy_Folders.zip
 Outputs/YOLO26_Train_FAIR1M/
 TEMP.py
 .vscode/
+Outputs/Test_YOLOn_TrOn_FAIR1M_On_DOTA/
 
 # Type of files
 *.jpg
