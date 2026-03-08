@@ -1,0 +1,14 @@
+
+Overall Validation Set Accuracy: 74.85%
+              precision    recall  f1-score   support
+
+         Bus     0.5071    0.3252    0.3963       329
+ Cargo Truck     0.7937    0.7883    0.7910      3510
+  Dump Truck     0.7232    0.8520    0.7823      2548
+   Excavator     0.7778    0.5263    0.6278       133
+     Tractor     0.6953    0.4238    0.5266       210
+     Trailer     0.5323    0.2122    0.3034       311
+
+    accuracy                         0.7485      7041
+   macro avg     0.6716    0.5213    0.5713      7041
+weighted avg     0.7400    0.7485    0.7369      7041

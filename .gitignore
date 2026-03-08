@@ -26,3 +26,4 @@ Outputs/Test_YOLOn_TrOn_FAIR1M_On_DOTA/
 *.pt
 *.pth
 *.zip
+*.joblib
