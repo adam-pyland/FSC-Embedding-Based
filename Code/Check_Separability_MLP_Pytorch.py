@@ -32,8 +32,8 @@ from sklearn.utils.class_weight import compute_class_weight
 # ==========================================
 
 # Updated directories for Triplet Loss
-SAVE_DIR = 'models/MLP-Pytorch-Triplet-Loss-CosSim'
-PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_Triplet_Loss-CosSim'
+SAVE_DIR = 'models/MLP-Pytorch-SupCon-Loss-CosSim'
+PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_SupCon_Loss-CosSim'
 
 class MLP_PyTorch(nn.Module):
     """
@@ -263,7 +263,8 @@ def main():
         # ==============================================================
         def objective(trial):
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
-            triplet_weight = trial.suggest_float('triplet_weight', 0.05, 1.0, log=True) # Triplet weight replacing center
+            supcon_weight = trial.suggest_float('supcon_weight', 0.1, 2.0, log=True) # Stronger weight for SupCon
+            temperature = trial.suggest_float('temperature', 0.01, 0.2, log=True) # SupCon spread parameter
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
@@ -274,33 +275,29 @@ def main():
             trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
             criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
             
-            # --- NEW: Triplet Miner and Loss ---
+            # --- NEW: Supervised Contrastive Loss ---
             cosine_dist = distances.CosineSimilarity()
-            miner = pml_miners.BatchHardMiner(distance=cosine_dist)
-            criterion_triplet = pml_losses.TripletMarginLoss(margin=0.2, distance=cosine_dist)
+            # SupCon natively handles the whole batch, no Miner needed!
+            criterion_supcon = pml_losses.SupConLoss(temperature=temperature, distance=cosine_dist)
             
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
 
             best_val_loss = float('inf')
             
-            for epoch in range(200):
+            for epoch in range(50):
                 trial_model.train()
                 for features, labels in train_loader:
                     features, labels = features.to(device), labels.to(device)
                     optimizer.zero_grad()
                     
                     logits, hidden_feats = trial_model(features)
-                    
-                    # Optional but recommended: L2 normalize features for Triplet distance
                     norm_feats = F.normalize(hidden_feats, p=2, dim=1)
                     
-                    # Mine triplets and calculate losses
-                    indices_tuple = miner(norm_feats, labels)
-                    loss_triplet = criterion_triplet(norm_feats, labels, indices_tuple)
-                    
+                    # SupCon takes all embeddings and handles the positive/negative matching internally
+                    loss_supcon = criterion_supcon(norm_feats, labels)
                     loss_focal = criterion_focal(logits, labels)
                     
-                    loss = loss_focal + triplet_weight * loss_triplet
+                    loss = loss_focal + supcon_weight * loss_supcon
                     loss.backward()
                     optimizer.step()
                     
@@ -313,12 +310,11 @@ def main():
                         logits, hidden_feats = trial_model(features)
                         
                         norm_feats = F.normalize(hidden_feats, p=2, dim=1)
-                        indices_tuple = miner(norm_feats, labels)
                         
-                        loss_triplet = criterion_triplet(norm_feats, labels, indices_tuple)
+                        loss_supcon = criterion_supcon(norm_feats, labels)
                         loss_focal = criterion_focal(logits, labels)
                         
-                        val_loss += (loss_focal + triplet_weight * loss_triplet).item()
+                        val_loss += (loss_focal + supcon_weight * loss_supcon).item()
                 
                 val_loss /= len(val_loader)
                 
@@ -383,8 +379,8 @@ def main():
         # --- NEW: Final Triplet setup ---
         cosine_dist = distances.CosineSimilarity()
         miner = pml_miners.BatchHardMiner(distance=cosine_dist)
-        criterion_triplet = pml_losses.TripletMarginLoss(margin=0.2, distance=cosine_dist)
-        final_triplet_weight = best_params['triplet_weight']
+        criterion_supcon = pml_losses.SupConLoss(temperature=best_params['temperature'], distance=cosine_dist)
+        final_supcon_weight = best_params['supcon_weight']
         
         # Removed optimizer_center entirely
         optimizer = optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay']) 
@@ -407,11 +403,9 @@ def main():
                 logits, hidden_feats = model(features)
                 norm_feats = F.normalize(hidden_feats, p=2, dim=1)
                 
-                indices_tuple = miner(norm_feats, labels)
-                loss_triplet = criterion_triplet(norm_feats, labels, indices_tuple)
+                loss_supcon = criterion_supcon(norm_feats, labels)
                 loss_focal = criterion_focal(logits, labels)
-                
-                loss = loss_focal + final_triplet_weight * loss_triplet
+                loss = loss_focal + final_supcon_weight * loss_supcon
                 loss.backward()
                 
                 optimizer.step()
@@ -427,10 +421,10 @@ def main():
                     norm_feats = F.normalize(hidden_feats, p=2, dim=1)
                     indices_tuple = miner(norm_feats, labels)
                     
-                    loss_triplet = criterion_triplet(norm_feats, labels, indices_tuple)
+                    loss_triplet = criterion_supcon(norm_feats, labels, indices_tuple)
                     loss_focal = criterion_focal(logits, labels)
                     
-                    loss = loss_focal + final_triplet_weight * loss_triplet
+                    loss = loss_focal + final_supcon_weight * loss_triplet
                     val_loss += loss.item()
             
             val_loss /= len(val_loader)
