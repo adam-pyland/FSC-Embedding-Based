@@ -14,9 +14,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import optuna 
 
-# NEW: Import Metric Learning components
+# Metric Learning components
 from pytorch_metric_learning import losses as pml_losses
-from pytorch_metric_learning import miners as pml_miners
 from pytorch_metric_learning import distances
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -26,38 +25,39 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 
+SAVE_DIR = 'models/MLP-Pytorch-TwoStage-SupCon'
+PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_TwoStage-SupCon'
 
 # ==========================================
-# 1. PyTorch Model and Loss Definitions
+# 1. Splitting the Model for Two-Stage Training
 # ==========================================
 
-# Updated directories for Triplet Loss
-SAVE_DIR = 'models/MLP-Pytorch-SupCon-Loss-CosSim'
-PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_SupCon_Loss-CosSim'
-
-class MLP_PyTorch(nn.Module):
-    """
-    Replicates the scikit-learn MLP architecture:
-    Input -> Linear(512) -> ReLU -> Linear(256) -> ReLU -> Linear(num_classes)
-    """
-    def __init__(self, input_dim, num_classes):
-        super(MLP_PyTorch, self).__init__()
+class MLP_Encoder(nn.Module):
+    """Stage 1: Learns the 256-D clusters using SupCon"""
+    def __init__(self, input_dim, dropout_rate=0.4):
+        super(MLP_Encoder, self).__init__()
         self.fc1 = nn.Linear(input_dim, 512)
+        self.bn1 = nn.BatchNorm1d(512)  # BatchNorm stabilizes SupCon
+        self.drop1 = nn.Dropout(dropout_rate)    # Prevents memorizing DINO features
+        
         self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, num_classes)
+        self.bn2 = nn.BatchNorm1d(256)
 
     def forward(self, x):
-        h1 = F.relu(self.fc1(x))
-        h2 = F.relu(self.fc2(h1))
-        logits = self.fc3(h2)
-        return logits, h2  # Returning h2 to extract the 256-D features easily
-    
+        h1 = self.drop1(F.relu(self.bn1(self.fc1(x))))
+        h2 = F.relu(self.bn2(self.fc2(h1)))
+        return h2
+
+class MLP_Classifier(nn.Module):
+    """Stage 2: Classifies the frozen clusters"""
+    def __init__(self, num_classes):
+        super(MLP_Classifier, self).__init__()
+        self.fc3 = nn.Linear(256, num_classes)
+
+    def forward(self, h2):
+        return self.fc3(h2)
 
 class FocalLoss(nn.Module):
-    """
-    Focal Loss pushes the model to focus on hard-to-classify examples 
-    and scales down the loss for easy (majority) examples.
-    """
     def __init__(self, weight=None, gamma=2.0, reduction='mean'):
         super(FocalLoss, self).__init__()
         self.weight = weight 
@@ -68,27 +68,15 @@ class FocalLoss(nn.Module):
         ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')
         pt = torch.exp(-ce_loss) 
         focal_loss = ((1 - pt) ** self.gamma) * ce_loss
-
-        if self.reduction == 'mean':
-            return focal_loss.mean()
-        elif self.reduction == 'sum':
-            return focal_loss.sum()
-        else:
-            return focal_loss
-
-# CenterLoss class has been REMOVED. 
-# We now use pytorch_metric_learning directly in the training loops.
+        if self.reduction == 'mean': return focal_loss.mean()
+        elif self.reduction == 'sum': return focal_loss.sum()
+        else: return focal_loss
 
 # ==========================================
 # 2. Evaluation and Visualization
 # ==========================================
-
 def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz):
-    base_subclasses =[
-        'Bus', 'Dump Truck', 'Tractor', 
-        'Truck Tractor', 'Excavator', 'other-vehicle'
-    ]
-    
+    base_subclasses =['Bus', 'Dump Truck', 'Tractor', 'Truck Tractor', 'Excavator', 'other-vehicle']
     def map_to_superclass(labels):
         return np.array(['Base' if lbl in base_subclasses else 'Novel' for lbl in labels])
     
@@ -98,223 +86,176 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
     print("\n" + "="*50)
     print("--- BASE vs NOVEL Classification Report ---")
     os.makedirs(PLOT_DIR, exist_ok=True)
-    file_path = os.path.join(PLOT_DIR, 'Base_Novel_Classification.txt')
     report = classification_report(y_test_super, y_pred_super, digits=4)
-    with open(file_path, "w") as f:
+    with open(os.path.join(PLOT_DIR, 'Base_Novel_Classification.txt'), "w") as f:
         f.write(report)
         print(report)
     print("="*50 + "\n")
     
     y_test_viz_super = map_to_superclass(y_test_viz)
     
-    print("Plotting Base vs Novel separation graphs...")
     sns.set_theme(style="whitegrid")
     fig, axes = plt.subplots(1, 2, figsize=(22, 10))
-    
-    unique_superclasses =['Base', 'Novel']
+    unique_superclasses = ['Base', 'Novel']
     super_palette = {'Base': 'royalblue', 'Novel': 'crimson'}
     bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
 
-    sns.scatterplot(
-        ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
-        hue=y_test_viz_super, palette=super_palette, s=60, alpha=0.6, edgecolor=None
-    )
-    for cls in unique_superclasses:
-        if cls in y_test_viz_super:
-            cls_points = X_kpca[y_test_viz_super == cls]
-            center_x, center_y = np.mean(cls_points[:, 0]), np.mean(cls_points[:, 1])
-            axes[0].scatter(center_x, center_y, marker='*', s=800, color=super_palette[cls], edgecolor='black', zorder=10)
-            axes[0].annotate(f"{cls} Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
-                             fontsize=12, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[0].set_title('Kernel PCA: Base vs Novel Classes', fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Principal Component 1')
-    axes[0].set_ylabel('Principal Component 2')
-    axes[0].legend(title='Superclass', bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    sns.scatterplot(
-        ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
-        hue=y_test_viz_super, palette=super_palette, s=60, alpha=0.6, edgecolor=None, legend=False
-    )
-    for cls in unique_superclasses:
-        if cls in y_test_viz_super:
-            cls_points = X_tsne[y_test_viz_super == cls]
-            center_x, center_y = np.median(cls_points[:, 0]), np.median(cls_points[:, 1])
-            axes[1].scatter(center_x, center_y, marker='*', s=800, color=super_palette[cls], edgecolor='black', zorder=10)
-            axes[1].annotate(f"{cls} Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
-                             fontsize=12, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[1].set_title('t-SNE Map: Base vs Novel Classes', fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('t-SNE Dimension 1')
-    axes[1].set_ylabel('t-SNE Dimension 2')
+    sns.scatterplot(ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1], hue=y_test_viz_super, palette=super_palette, s=60, alpha=0.6, edgecolor=None)
+    sns.scatterplot(ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1], hue=y_test_viz_super, palette=super_palette, s=60, alpha=0.6, edgecolor=None, legend=False)
+    
+    axes[0].set_title('Kernel PCA: Base vs Novel', fontsize=14, fontweight='bold')
+    axes[1].set_title('t-SNE Map: Base vs Novel', fontsize=14, fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(os.path.join(PLOT_DIR, 'Base_vs_Novel_Separation_NO_CARS_VANS.png'), dpi=300)
-    print("Done! Saved plot as 'Base_vs_Novel_Separation_NO_CARS_VANS.png'")
+    print("Done! Saved Base vs Novel plot.")
 
 # ==========================================
 # 3. Main Script Pipeline
 # ==========================================
-
 def main():
-    hyperparam_search = True  # Set to True if you want to run Optuna again
+    hyperparam_search = True  # Set to True to run Optuna
     train_base_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/base_class'
     train_novel_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/novel_class'
-
     val_base_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/val/base_class'
     val_novel_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/val/novel_class'
 
-    all_classes =[
-        'Bus', 'Dump Truck', 'Tractor', 
-        'Truck Tractor', 'Excavator', 
-        'Cargo Truck', 'Trailer'
-    ]
+    all_classes =['Bus', 'Dump Truck', 'Tractor', 'Truck Tractor', 'Excavator', 'Cargo Truck', 'Trailer']
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
 
-    X_train, y_train =[],[]
-    X_test, y_test = [],[]
+    X_train, y_train, X_test, y_test = [], [], [],[]
 
     def load_features_from_dir(directory, X_list, y_list):
-        if not os.path.exists(directory):
-            print(f"Warning: Directory does not exist -> {directory}")
-            return
-            
-        files = glob.glob(os.path.join(directory, '*.npy'))
-        for f in files:
+        if not os.path.exists(directory): return
+        for f in glob.glob(os.path.join(directory, '*.npy')):
             filename = os.path.basename(f)
             for safe_cls in safe_class_names:
                 if f"_{safe_cls}_" in filename:
-                    embedding = np.load(f).flatten()
-                    X_list.append(embedding)
+                    X_list.append(np.load(f).flatten())
                     y_list.append(safe_cls.replace("_", " ")) 
                     break
 
-    print("Loading 100% of Training features... (This might take a minute)")
+    print("Loading features...")
     load_features_from_dir(train_base_dir, X_train, y_train)
     load_features_from_dir(train_novel_dir, X_train, y_train)
-
-    print("Loading Validation/Testing features...")
     load_features_from_dir(val_base_dir, X_test, y_test)
     load_features_from_dir(val_novel_dir, X_test, y_test)
 
-    X_train = np.array(X_train)
-    y_train = np.array(y_train)
-    X_test = np.array(X_test)
-    y_test = np.array(y_test)
-    
-    print(f"Loaded {X_train.shape[0]} training embeddings.")
-    print(f"Loaded {X_test.shape[0]} validation embeddings.")
-
-    if X_train.shape[0] == 0 or X_test.shape[0] == 0:
-        print("Error: Training or testing data is empty. Please check your file paths.")
-        return
+    X_train, y_train = np.array(X_train), np.array(y_train)
+    X_test, y_test = np.array(X_test), np.array(y_test)
 
     le = LabelEncoder()
     y_train_encoded = le.fit_transform(y_train)
     y_test_encoded = le.transform(y_test)
 
     os.makedirs(SAVE_DIR, exist_ok=True) 
-    
-    best_model_file = os.path.join(SAVE_DIR, 'best_mlp_NO_CARS_VANS.pth')
-    last_model_file = os.path.join(SAVE_DIR, 'last_mlp_NO_CARS_VANS.pth')
-    scaler_file = os.path.join(SAVE_DIR, 'saved_scaler_NO_CARS_VANS.joblib')
-    le_file = os.path.join(SAVE_DIR, 'saved_le_NO_CARS_VANS.joblib') 
+    best_encoder_file = os.path.join(SAVE_DIR, 'best_encoder.pth')
+    best_classifier_file = os.path.join(SAVE_DIR, 'best_classifier.pth')
+    scaler_file = os.path.join(SAVE_DIR, 'saved_scaler.joblib')
+    le_file = os.path.join(SAVE_DIR, 'saved_le.joblib') 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
     input_dim = X_train.shape[1]
     num_classes = len(le.classes_)
-    
-    model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
 
-    if os.path.exists(best_model_file) and os.path.exists(scaler_file) and os.path.exists(le_file):
-        print(f"\nFound saved PyTorch model at {SAVE_DIR}! Loading weights instantly...")
-        model.load_state_dict(torch.load(best_model_file, map_location=device))
-        model.eval()
+    if os.path.exists(best_encoder_file) and os.path.exists(best_classifier_file) and not hyperparam_search:
+        print("\nFound saved Two-Stage PyTorch model! Loading weights...")
+        encoder = MLP_Encoder(input_dim=input_dim).to(device)
+        classifier = MLP_Classifier(num_classes=num_classes).to(device)
+        encoder.load_state_dict(torch.load(best_encoder_file, map_location=device))
+        classifier.load_state_dict(torch.load(best_classifier_file, map_location=device))
+        encoder.eval()
+        classifier.eval()
         scaler = load(scaler_file)
         le = load(le_file)
         X_test_scaled = scaler.transform(X_test)
     else:
-        print("\nNo saved model found. Preparing for Training...")
+        print("\nPreparing Data for Two-Stage Training...")
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test) 
-        
         dump(scaler, scaler_file)
         dump(le, le_file)
         
         X_tr, X_val, y_tr, y_val = train_test_split(X_train_scaled, y_train_encoded, test_size=0.1, random_state=42)
         
-        # Define DataLoaders once
         batch_size = 512
-        train_dataset = TensorDataset(torch.FloatTensor(X_tr), torch.LongTensor(y_tr))
-        val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
-        
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-
-        # Base Raw Class weights
-        print("\nCalculating Base Class Weights...")
+        train_loader = DataLoader(TensorDataset(torch.FloatTensor(X_tr), torch.LongTensor(y_tr)), batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val)), batch_size=batch_size, shuffle=False)
         raw_class_weights = compute_class_weight('balanced', classes=np.unique(y_train_encoded), y=y_train_encoded)
 
         # ==============================================================
-        # OPTUNA HYPERPARAMETER SEARCH
+        # OPTUNA HYPERPARAMETER SEARCH (TWO-STAGE)
         # ==============================================================
         def objective(trial):
+            # Stage 1 Params (Encoder/SupCon)
+            supcon_temp = trial.suggest_float('supcon_temp', 0.01, 0.2, log=True)
+            enc_lr = trial.suggest_float('enc_lr', 1e-4, 5e-3, log=True)
+            enc_wd = trial.suggest_float('enc_wd', 1e-5, 1e-2, log=True)
+            dropout_rate = trial.suggest_float('dropout_rate', 0.2, 0.6)
+            
+            # Stage 2 Params (Classifier/Focal)
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
-            supcon_weight = trial.suggest_float('supcon_weight', 0.1, 2.0, log=True) # Stronger weight for SupCon
-            temperature = trial.suggest_float('temperature', 0.01, 0.2, log=True) # SupCon spread parameter
-            lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
-            weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
+            clf_lr = trial.suggest_float('clf_lr', 1e-4, 5e-3, log=True)
+            clf_wd = trial.suggest_float('clf_wd', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
 
-            smoothed_weights = np.power(raw_class_weights, weight_smoothing)
-            class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
-
-            trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
-            criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
+            # --- Initialize Trial Models ---
+            trial_encoder = MLP_Encoder(input_dim=input_dim, dropout_rate=dropout_rate).to(device)
+            trial_classifier = MLP_Classifier(num_classes=num_classes).to(device)
             
-            # --- NEW: Supervised Contrastive Loss ---
+            # --- TRIAL STAGE 1: Train Encoder ---
             cosine_dist = distances.CosineSimilarity()
-            # SupCon natively handles the whole batch, no Miner needed!
-            criterion_supcon = pml_losses.SupConLoss(temperature=temperature, distance=cosine_dist)
+            criterion_supcon = pml_losses.SupConLoss(temperature=supcon_temp, distance=cosine_dist).to(device)
+            optimizer_enc = optim.Adam(trial_encoder.parameters(), lr=enc_lr, weight_decay=enc_wd)
             
-            optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
-
-            best_val_loss = float('inf')
-            
-            for epoch in range(50):
-                trial_model.train()
+            for epoch in range(250): # Short Stage 1 run for search
+                trial_encoder.train()
                 for features, labels in train_loader:
                     features, labels = features.to(device), labels.to(device)
-                    optimizer.zero_grad()
-                    
-                    logits, hidden_feats = trial_model(features)
+                    optimizer_enc.zero_grad()
+                    hidden_feats = trial_encoder(features)
                     norm_feats = F.normalize(hidden_feats, p=2, dim=1)
-                    
-                    # SupCon takes all embeddings and handles the positive/negative matching internally
-                    loss_supcon = criterion_supcon(norm_feats, labels)
-                    loss_focal = criterion_focal(logits, labels)
-                    
-                    loss = loss_focal + supcon_weight * loss_supcon
+                    loss = criterion_supcon(norm_feats, labels)
                     loss.backward()
-                    optimizer.step()
+                    optimizer_enc.step()
                     
-                # Validation
-                trial_model.eval()
+            # Freeze trial encoder
+            trial_encoder.eval()
+            for param in trial_encoder.parameters():
+                param.requires_grad = False
+                
+            # --- TRIAL STAGE 2: Train Classifier ---
+            smoothed_weights = np.power(raw_class_weights, weight_smoothing)
+            class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
+            criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
+            optimizer_clf = optim.Adam(trial_classifier.parameters(), lr=clf_lr, weight_decay=clf_wd)
+            
+            best_val_loss = float('inf')
+            
+            for epoch in range(500): # Short Stage 2 run for search
+                trial_classifier.train()
+                for features, labels in train_loader:
+                    features, labels = features.to(device), labels.to(device)
+                    optimizer_clf.zero_grad()
+                    with torch.no_grad():
+                        hidden_feats = trial_encoder(features)
+                        norm_feats = F.normalize(hidden_feats, p=2, dim=1)
+                    logits = trial_classifier(norm_feats)
+                    loss = criterion_focal(logits, labels)
+                    loss.backward()
+                    optimizer_clf.step()
+                    
+                # Validation (This is what Optuna cares about)
+                trial_classifier.eval()
                 val_loss = 0.0
                 with torch.no_grad():
                     for features, labels in val_loader:
                         features, labels = features.to(device), labels.to(device)
-                        logits, hidden_feats = trial_model(features)
-                        
+                        hidden_feats = trial_encoder(features)
                         norm_feats = F.normalize(hidden_feats, p=2, dim=1)
-                        
-                        loss_supcon = criterion_supcon(norm_feats, labels)
-                        loss_focal = criterion_focal(logits, labels)
-                        
-                        val_loss += (loss_focal + supcon_weight * loss_supcon).item()
+                        logits = trial_classifier(norm_feats)
+                        val_loss += criterion_focal(logits, labels).item()
                 
                 val_loss /= len(val_loader)
                 
@@ -327,7 +268,7 @@ def main():
                     
             return best_val_loss
 
-        # Run Study
+        # --- RUN OPTUNA ---
         os.makedirs(PLOT_DIR, exist_ok=True)
         file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
 
@@ -348,111 +289,153 @@ def main():
             with open(file_path, 'w') as f:
                 json.dump(best_params, f, indent=4)
         else:
-            best_params = None
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    best_params = json.load(f)
+            else:
+                raise ValueError("No hyperparameters found! Run hyperparam_search=True.")
 
+        print("+"*30)
+        print(f"Using parameters: {best_params}")
 
         # ==============================================================
-        # FINAL FULL TRAINING WITH BEST HYPERPARAMETERS
+        # FINAL FULL TRAINING: STAGE 1 (SUPCON ONLY)
         # ==============================================================
-        print("Training Final Model with Best Hyperparameters...")
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
-                best_params = json.load(f)
-                print("+"*30)
-                print(f"Loaded parameters from JSON: {best_params}")
-                
-                # Graceful fallback: map old 'center_weight' to 'triplet_weight' if reusing old JSON
-                if 'triplet_weight' not in best_params and 'center_weight' in best_params:
-                    print("Note: Found old 'center_weight'. Automatically mapping to 'triplet_weight'.")
-                    best_params['triplet_weight'] = best_params['center_weight']
+        print("\n" + "="*50)
+        print("STAGE 1: Training Final Encoder with SupCon Loss")
+        print("="*50)
         
-        if best_params is None:
-            raise ValueError("No hyperparameters found! Either run hyperparam_search=True or provide a JSON file.")
-
-        # Setup final dynamically smoothed weights
-        smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
-        class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
-
-        # Final Setup
-        criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
-        
-        # --- NEW: Final Triplet setup ---
+        encoder = MLP_Encoder(input_dim=input_dim, dropout_rate=best_params['dropout_rate']).to(device)
         cosine_dist = distances.CosineSimilarity()
-        miner = pml_miners.BatchHardMiner(distance=cosine_dist)
-        criterion_supcon = pml_losses.SupConLoss(temperature=best_params['temperature'], distance=cosine_dist)
-        final_supcon_weight = best_params['supcon_weight']
+        criterion_supcon = pml_losses.SupConLoss(temperature=best_params['supcon_temp'], distance=cosine_dist).to(device)
+        optimizer_enc = optim.Adam(encoder.parameters(), lr=best_params['enc_lr'], weight_decay=best_params['enc_wd'])
         
-        # Removed optimizer_center entirely
-        optimizer = optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay']) 
-
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
+        best_val_supcon = float('inf')
+        epochs_no_improve_enc = 0
         
-        patience = 50
-        best_val_loss = float('inf')
-        epochs_no_improve = 0
-        max_epochs = 500
-
-        for epoch in range(max_epochs):
-            model.train()
+        for epoch in range(250):
+            encoder.train()
             train_loss = 0.0
             for features, labels in train_loader:
                 features, labels = features.to(device), labels.to(device)
+                optimizer_enc.zero_grad()
                 
-                optimizer.zero_grad()
-                
-                logits, hidden_feats = model(features)
+                hidden_feats = encoder(features)
                 norm_feats = F.normalize(hidden_feats, p=2, dim=1)
                 
-                loss_supcon = criterion_supcon(norm_feats, labels)
-                loss_focal = criterion_focal(logits, labels)
-                loss = loss_focal + final_supcon_weight * loss_supcon
+                loss = criterion_supcon(norm_feats, labels)
                 loss.backward()
-                
-                optimizer.step()
+                optimizer_enc.step()
                 train_loss += loss.item()
                 
-            model.eval()
+            encoder.eval()
             val_loss = 0.0
             with torch.no_grad():
                 for features, labels in val_loader:
                     features, labels = features.to(device), labels.to(device)
-                    logits, hidden_feats = model(features)
-                    
+                    hidden_feats = encoder(features)
                     norm_feats = F.normalize(hidden_feats, p=2, dim=1)
-                    indices_tuple = miner(norm_feats, labels)
-                    
-                    loss_triplet = criterion_supcon(norm_feats, labels, indices_tuple)
-                    loss_focal = criterion_focal(logits, labels)
-                    
-                    loss = loss_focal + final_supcon_weight * loss_triplet
-                    val_loss += loss.item()
+                    val_loss += criterion_supcon(norm_feats, labels).item()
+            
+            val_loss /= len(val_loader)
+            if (epoch+1) % 10 == 0:
+                print(f"Epoch[{epoch+1}/150], Train SupCon: {train_loss/len(train_loader):.4f}, Val SupCon: {val_loss:.4f}")
+
+            if val_loss < best_val_supcon: 
+                best_val_supcon = val_loss
+                torch.save(encoder.state_dict(), best_encoder_file)
+                epochs_no_improve_enc = 0
+            else:
+                epochs_no_improve_enc += 1
+                
+            if epochs_no_improve_enc >= 70: # Early stopping for Stage 1
+                print(f"Stage 1 Early stopping at epoch {epoch+1}")
+                break
+
+        print("Stage 1 Complete! Encoder frozen.")
+        encoder.load_state_dict(torch.load(best_encoder_file))
+        
+        # FREEZE ENCODER
+        for param in encoder.parameters():
+            param.requires_grad = False
+        encoder.eval()
+
+        # ==============================================================
+        # FINAL FULL TRAINING: STAGE 2 (FOCAL LOSS ONLY)
+        # ==============================================================
+        print("\n" + "="*50)
+        print("STAGE 2: Training Classifier on Frozen Embeddings")
+        print("="*50)
+        
+        classifier = MLP_Classifier(num_classes=num_classes).to(device)
+        smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing']) 
+        class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
+        
+        criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
+        optimizer_clf = optim.Adam(classifier.parameters(), lr=best_params['clf_lr'], weight_decay=best_params['clf_wd'])
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer_clf, mode='min', factor=0.5, patience=10)
+        
+        best_val_focal = float('inf')
+        epochs_no_improve_clf = 0
+        
+        for epoch in range(500):
+            classifier.train()
+            train_loss = 0.0
+            for features, labels in train_loader:
+                features, labels = features.to(device), labels.to(device)
+                optimizer_clf.zero_grad()
+                
+                with torch.no_grad(): # Embeddings are frozen!
+                    hidden_feats = encoder(features)
+                    norm_feats = F.normalize(hidden_feats, p=2, dim=1) 
+                
+                logits = classifier(norm_feats)
+                loss = criterion_focal(logits, labels)
+                loss.backward()
+                optimizer_clf.step()
+                train_loss += loss.item()
+                
+            classifier.eval()
+            val_loss = 0.0
+            with torch.no_grad():
+                for features, labels in val_loader:
+                    features, labels = features.to(device), labels.to(device)
+                    hidden_feats = encoder(features)
+                    norm_feats = F.normalize(hidden_feats, p=2, dim=1)
+                    logits = classifier(norm_feats)
+                    val_loss += criterion_focal(logits, labels).item()
             
             val_loss /= len(val_loader)
             scheduler.step(val_loss)
             
             if (epoch+1) % 10 == 0:
-                print(f"Epoch [{epoch+1}/{max_epochs}], Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}")
+                print(f"Epoch[{epoch+1}/250], Train Focal: {train_loss/len(train_loader):.4f}, Val Focal: {val_loss:.4f}")
 
-            if val_loss < best_val_loss - 1e-6: 
-                best_val_loss = val_loss
-                epochs_no_improve = 0
-                torch.save(model.state_dict(), best_model_file) 
+            if val_loss < best_val_focal: 
+                best_val_focal = val_loss
+                torch.save(classifier.state_dict(), best_classifier_file)
+                epochs_no_improve_clf = 0
             else:
-                epochs_no_improve += 1
+                epochs_no_improve_clf += 1
                 
-        torch.save(model.state_dict(), last_model_file)
-        print("Training Complete! Saved best and last models.")
-        
-        # Load best weights for evaluation
-        model.load_state_dict(torch.load(best_model_file))
-        model.eval()
+            # if epochs_no_improve_clf >= 30: # Early stopping for Stage 2
+            #     print(f"Stage 2 Early stopping at epoch {epoch+1}")
+            #     break
+                
+        print("Stage 2 Complete! Model Fully Trained.")
+        classifier.load_state_dict(torch.load(best_classifier_file))
 
     # --- 4. DETAILED METRICS CALCULATION ---
     X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
     y_test_tensor = torch.LongTensor(y_test_encoded).to(device)
 
+    encoder.eval()
+    classifier.eval()
     with torch.no_grad():
-        test_logits, X_separated_features_all = model(X_test_tensor)
+        X_separated_features_all = encoder(X_test_tensor)
+        norm_test_feats = F.normalize(X_separated_features_all, p=2, dim=1)
+        test_logits = classifier(norm_test_feats)
+        
         _, y_pred_encoded = torch.max(test_logits, 1)
         y_pred_encoded = y_pred_encoded.cpu().numpy()
         X_separated_features_all = X_separated_features_all.cpu().numpy()
@@ -464,18 +447,15 @@ def main():
     
     print("\n--- Detailed Classification Report (Classes) ---")
     os.makedirs(PLOT_DIR, exist_ok=True)
-    file_path = os.path.join(PLOT_DIR, 'Classification_Report.txt')
-    report = classification_report(y_test, y_pred, digits=4)
-    with open(file_path, "w") as f:
+    with open(os.path.join(PLOT_DIR, 'Classification_Report.txt'), "w") as f:
+        report = classification_report(y_test, y_pred, digits=4)
         f.write(f"\nOverall Validation Set Accuracy: {accuracy * 100:.2f}%\n")
         f.write(report)
         print(report)
 
     # --- 5. Sample Validation Data for Visualization ---
     print("\nSampling Validation data for clear visualization...")
-    X_test_viz =[]
-    y_test_viz =[]
-    X_features_viz =[]
+    X_test_viz, y_test_viz, X_features_viz = [], [],[]
     samples_per_class = 200 
     
     for cls in np.unique(y_test):
@@ -485,7 +465,6 @@ def main():
         y_test_viz.extend(y_test[selected_idx])
         X_features_viz.extend(X_separated_features_all[selected_idx])
         
-    X_test_viz = np.array(X_test_viz)
     y_test_viz = np.array(y_test_viz)
     X_separated_features = np.array(X_features_viz)
 
@@ -503,47 +482,19 @@ def main():
     sns.set_theme(style="whitegrid")
     fig, axes = plt.subplots(1, 2, figsize=(22, 10))
     unique_classes = np.unique(y_test_viz)
-
     class_palette = dict(zip(unique_classes, sns.color_palette("tab10", len(unique_classes))))
     bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
 
-    sns.scatterplot(
-        ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None
-    )
-    for cls in unique_classes:
-        cls_points = X_kpca[y_test_viz == cls]
-        center_x, center_y = np.mean(cls_points[:, 0]), np.mean(cls_points[:, 1])
-        axes[0].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[0].annotate(cls, (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+    sns.scatterplot(ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1], hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None)
+    sns.scatterplot(ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1], hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False)
 
     axes[0].set_title('Kernel PCA (RBF) with Cluster Labels', fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Principal Component 1')
-    axes[0].set_ylabel('Principal Component 2')
-    axes[0].legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    sns.scatterplot(
-        ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False
-    )
-    for cls in unique_classes:
-        cls_points = X_tsne[y_test_viz == cls]
-        center_x, center_y = np.median(cls_points[:, 0]), np.median(cls_points[:, 1])
-        axes[1].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[1].annotate(cls, (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[1].set_title('t-SNE Map with Cluster Labels (Prototypes)', fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('t-SNE Dimension 1')
-    axes[1].set_ylabel('t-SNE Dimension 2')
+    axes[1].set_title('t-SNE Map with Cluster Labels', fontsize=14, fontweight='bold')
 
     plt.tight_layout()
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    plt.savefig(os.path.join(PLOT_DIR, 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'), dpi=300)
-    print("Done! Saved plot as 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'")
+    plt.savefig(os.path.join(PLOT_DIR, 'Test_Set_Labeled_Centers.png'), dpi=300)
+    print("Done! Saved plot.")
 
-    # === 9. Base vs Novel Evaluation and Visualization ===
     evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz)
 
 if __name__ == "__main__":
