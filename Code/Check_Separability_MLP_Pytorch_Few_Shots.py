@@ -16,7 +16,7 @@ import optuna # NEW: Imported Optuna
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.decomposition import KernelPCA
 from sklearn.manifold import TSNE
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, f1_score, fbeta_score
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 import json
@@ -25,8 +25,10 @@ import json
 # 1. PyTorch Model and Center Loss Definitions
 # ==========================================
 
-SAVE_DIR = 'models/MLP-Pytorch-Focal-Loss'
-PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_Focal_Loss'
+SAVE_DIR = 'models/MLP-Pytorch-Few-Shots-Focal-Loss'
+PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_Few-Shots-Focal_Loss'
+
+MAX_EPOCHS = 500
 
 class MLP_PyTorch(nn.Module):
     """
@@ -47,20 +49,26 @@ class MLP_PyTorch(nn.Module):
     
 
 class FocalLoss(nn.Module):
-    """
-    Focal Loss pushes the model to focus on hard-to-classify examples 
-    and scales down the loss for easy (majority) examples.
-    """
     def __init__(self, weight=None, gamma=2.0, reduction='mean'):
         super(FocalLoss, self).__init__()
-        self.weight = weight # Class weights tensor
+        self.weight = weight # This acts as the Alpha (class weights)
         self.gamma = gamma
         self.reduction = reduction
 
     def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')
-        pt = torch.exp(-ce_loss) 
-        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        # 1. Get raw, unweighted Cross Entropy to extract true probabilities (pt)
+        ce_loss_unweighted = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss_unweighted) 
+        
+        # 2. Calculate the Focal Term
+        focal_term = (1 - pt) ** self.gamma
+        
+        # 3. Apply Alpha (Class Weights) manually
+        if self.weight is not None:
+            alpha_t = self.weight[targets]
+            focal_loss = alpha_t * focal_term * ce_loss_unweighted
+        else:
+            focal_loss = focal_term * ce_loss_unweighted
 
         if self.reduction == 'mean':
             return focal_loss.mean()
@@ -102,7 +110,8 @@ class CenterLoss(nn.Module):
 def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz):
     base_subclasses =[
         'Bus', 'Dump Truck', 'Tractor', 
-        'Truck Tractor', 'Excavator', 'other-vehicle'
+        'Truck Tractor', 'Excavator', 
+        'Cargo Truck', 'other-vehicle'
     ]
     
     def map_to_superclass(labels):
@@ -174,7 +183,7 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
 
 def main():
     train_base_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/base_class'
-    train_novel_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/novel_class'
+    train_novel_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/novel_class_few_shot_trailer/'
 
     val_base_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/val/base_class'
     val_novel_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/val/novel_class'
@@ -266,8 +275,7 @@ def main():
         train_dataset = TensorDataset(torch.FloatTensor(X_tr), torch.LongTensor(y_tr))
         val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
         
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        
 
         # Base Raw Class weights
         print("\nCalculating Base Class Weights...")
@@ -276,23 +284,27 @@ def main():
         # ==============================================================
         # OPTUNA HYPERPARAMETER SEARCH
         # ==============================================================
-        print("\n" + "="*50)
-        print("Starting Optuna Hyperparameter Search (25 Trials)...")
-        print("="*50)
-
+        # Get the integer index for the 'Trailer' class
+        novel_class_idx = le.transform(['Trailer'])[0]
         def objective(trial):
             # 1. Suggest hyperparameters
+            batch_size = trial.suggest_categorical('batch_size',[256, 512, 1024, 2048, 4096])
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
             center_weight = trial.suggest_float('center_weight', 0.005, 0.1, log=True)
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
-            weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8) # 0.5 is sqrt
+            weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
 
-            # 2. Setup dynamically smoothed weights
+            # Let Optuna find the perfect Alpha booster for the Novel class
+            novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
+
             smoothed_weights = np.power(raw_class_weights, weight_smoothing)
+
+            # Explicitly boost the Trailer (Novel) class weight
+            smoothed_weights[novel_class_idx] *= novel_multiplier
+
             class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
-            # 3. Model & Losses
             trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
             criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
             criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
@@ -300,10 +312,16 @@ def main():
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
             optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-            best_val_loss = float('inf')
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+            # NEW: Track Best F1 Score (Maximize) instead of Loss (Minimize)
+            best_val_metric = -1.0 
+            epochs_no_improve = 0
+            search_patience = 50
+            max_search_epochs = 500
             
-            # Shortened epochs for search efficiency
-            for epoch in range(50):
+            for epoch in range(max_search_epochs):
                 trial_model.train()
                 for features, labels in train_loader:
                     features, labels = features.to(device), labels.to(device)
@@ -323,34 +341,63 @@ def main():
                         param.grad.data *= (1. / center_weight)
                     optimizer_center.step()
                     
-                # Validation
+                # Validation loop to calculate F1 Score
                 trial_model.eval()
-                val_loss = 0.0
+                all_preds = []
+                all_labels =[]
+                
                 with torch.no_grad():
                     for features, labels in val_loader:
                         features, labels = features.to(device), labels.to(device)
-                        logits, hidden_feats = trial_model(features)
+                        logits, _ = trial_model(features)
                         
-                        loss_focal = criterion_focal(logits, labels)
-                        loss_center = criterion_center(hidden_feats, labels)
-                        val_loss += (loss_focal + center_weight * loss_center).item()
+                        _, preds = torch.max(logits, 1)
+                        all_preds.extend(preds.cpu().numpy())
+                        all_labels.extend(labels.cpu().numpy())
                 
-                val_loss /= len(val_loader)
+                # NEW: Calculate F1 Scores
+                # Calculate F1 for all classes individually
+                f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, zero_division=0)
+                novel_f2 = f2_scores[novel_class_idx]
+
+                f1_scores = f1_score(all_labels, all_preds, average=None, zero_division=0)
                 
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
+                # Extract the F1 for the Novel class
+                novel_f1 = f1_scores[novel_class_idx]
+                
+                # Extract Global Macro F1
+                macro_f1 = np.mean(f1_scores)
+                
+                # THE SECRET SAUCE: Create a custom reward metric
+                # 75% focus on improving the Novel Class, 25% focus on keeping Base Classes healthy
+                custom_metric = (0.80 * novel_f2) + (0.20 * macro_f1)
+                
+                # Maximize the custom metric
+                if custom_metric > best_val_metric:
+                    best_val_metric = custom_metric
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
 
                 # Optuna Early Pruning
-                trial.report(val_loss, epoch)
+                trial.report(custom_metric, epoch)
                 if trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
+                
+                # Early Stopping
+                if epochs_no_improve >= search_patience:
+                    break
                     
-            return best_val_loss
+            return best_val_metric
 
         # Run Study
+        file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
         if not os.path.exists(file_path):
+            print("\n" + "="*50)
+            print("Starting Optuna Hyperparameter Search (25 Trials)...")
+            print("="*50)
             pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
-            study = optuna.create_study(direction='minimize', pruner=pruner)
+            study = optuna.create_study(direction='maximize', pruner=pruner)
             study.optimize(objective, n_trials=25)
 
             print("\n" + "="*50)
@@ -368,15 +415,20 @@ def main():
         # FINAL FULL TRAINING WITH BEST HYPERPARAMETERS
         # ==============================================================
         print("Training Final Model with Best Hyperparameters...")
-        file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
         if os.path.exists(file_path):
             with open(file_path, 'r') as f:
                 best_params = json.load(f)
                 print("+"*30)
                 print(f"Found parameter: {best_params}")
+        
+        final_batch_size = best_params.get('batch_size', 2048) # Default to 2048 if not found
+        train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
 
         # Setup final dynamically smoothed weights
         smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
+        if 'novel_multiplier' in best_params:
+            smoothed_weights[novel_class_idx] *= best_params['novel_multiplier']
         class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
         # Final Setup
@@ -387,14 +439,14 @@ def main():
         optimizer = optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay']) 
         optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10)
         
         patience = 50
-        best_val_loss = float('inf')
+        best_val_metric = -1.0
         epochs_no_improve = 0
-        max_epochs = 500
+        novel_class_idx = le.transform(['Trailer'])[0]
 
-        for epoch in range(max_epochs):
+        for epoch in range(MAX_EPOCHS):
             model.train()
             train_loss = 0.0
             for features, labels in train_loader:
@@ -419,6 +471,8 @@ def main():
                 train_loss += loss.item()
                 
             model.eval()
+            all_preds = []
+            all_labels =[]
             val_loss = 0.0
             with torch.no_grad():
                 for features, labels in val_loader:
@@ -429,22 +483,41 @@ def main():
                     loss_center = criterion_center(hidden_feats, labels)
                     loss = loss_focal + final_center_weight * loss_center
                     val_loss += loss.item()
+
+                    # Track predictions for Custom Metric
+                    _, preds = torch.max(logits, 1)
+                    all_preds.extend(preds.cpu().numpy())
+                    all_labels.extend(labels.cpu().numpy())
             
             val_loss /= len(val_loader)
-            scheduler.step(val_loss)
             
-            if (epoch+1) % 10 == 0:
-                print(f"Epoch [{epoch+1}/{max_epochs}], Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}")
 
-            if val_loss < best_val_loss - 1e-6: 
-                best_val_loss = val_loss
+            # --- CALCULATE CUSTOM METRIC FOR EARLY STOPPING ---
+            f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, zero_division=0) 
+            f1_scores = f1_score(all_labels, all_preds, average=None, zero_division=0)
+            
+            novel_f2 = f2_scores[novel_class_idx] 
+            macro_f1 = np.mean(f1_scores)
+            
+            # This is what we actually care about now
+            custom_metric = (0.80 * novel_f2) + (0.20 * macro_f1) 
+            
+            scheduler.step(custom_metric)
+
+
+            if (epoch+1) % 10 == 0:
+                print(f"Epoch [{epoch+1}/{MAX_EPOCHS}], Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}")
+
+            # NEW: Save model based on MAXIMIZING the custom metric
+            if custom_metric > best_val_metric + 1e-4: 
+                best_val_metric = custom_metric
                 epochs_no_improve = 0
                 torch.save(model.state_dict(), best_model_file) 
             else:
                 epochs_no_improve += 1
                 
             if epochs_no_improve >= patience:
-                print(f"Early stopping triggered at epoch {epoch+1}")
+                print(f"Early stopping triggered at epoch {epoch+1} (No improvement in Novel F2/Metric)")
                 break
                 
         torch.save(model.state_dict(), last_model_file)
