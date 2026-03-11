@@ -22,17 +22,25 @@ from sklearn.utils.class_weight import compute_class_weight
 import json
 
 # ==========================================
-# Global Configuration & Top-K Flags
+# Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-# NEW: Flag to enable Top-K Accuracy and Metrics
-USE_TOP_K_METRICS = False
+# Top-K Metrics
+USE_TOP_K_METRICS = True
 TOP_K_VALUE = 3
 
-SAVE_DIR = 'models/MLP-Pytorch-Few-Shots-Focal-Loss-TOP-1'
-PLOT_DIR = 'Outputs/MLP-Pytorch-t-SNE-Graphs_Few-Shots-Focal_Loss-TOP-1'
+# NEW: Prototype-based Prediction Flags
+USE_PROTOTYPE_PREDICTIONS = True   # True: Predict based on 256D features. False: Predict using MLP logit scores.
+DISTANCE_METRIC = 'cosine'             # Options: 'l2' (Euclidean distance) or 'cosine' (Cosine similarity)
+CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
+
+SAVE_DIR = 'models/MLP-Pytorch-Few-Shots-Focal-Loss-TOP3-L2-Distance-Based'
+PLOT_DIR = 'Outputs/MLP-Pytorch-Few-Shots-Focal_Loss-TOP3-L2-Distance-Based'
+os.makedirs(PLOT_DIR, exist_ok=True)
 
 MAX_EPOCHS = 500
+
+
 
 # ==========================================
 # 1. PyTorch Model and Center Loss Definitions
@@ -112,38 +120,74 @@ class CenterLoss(nn.Module):
         return loss
 
 # ==========================================
-# 2. Evaluation and Visualization
+# 2. Evaluation and Distance Helpers
 # ==========================================
 
-def get_predictions(logits, labels, top_k=1, use_top_k=False):
+def compute_train_centers(model, dataloader, num_classes, device):
     """
-    Returns predictions based on top-1 or top-k logic.
-    If use_top_k is True:
-        Checks if the true label is within the top-k predicted classes.
-        If it is, the prediction is considered correct (returns the true label).
-        If not, it returns the top-1 predicted class as the prediction.
+    Passes over the training data to calculate the exact mean vector (prototype) 
+    for each class in the 256-D space.
+    """
+    model.eval()
+    centers = torch.zeros(num_classes, 256).to(device)
+    counts = torch.zeros(num_classes).to(device)
+    
+    with torch.no_grad():
+        for features, labels in dataloader:
+            features, labels = features.to(device), labels.to(device)
+            _, h2 = model(features)
+            # Accumulate sum of vectors per class
+            centers.index_add_(0, labels, h2)
+            counts.index_add_(0, labels, torch.ones_like(labels, dtype=torch.float))
+            
+    # Divide by count to get the mean (add small epsilon to avoid division by zero)
+    counts = counts.clamp(min=1e-8)
+    centers = centers / counts.unsqueeze(1)
+    return centers
+
+def compute_prototype_scores(h2, centers, metric='cosine'):
+    """
+    Calculates distance/similarity to prototypes and returns a 'score'
+    where a HIGHER score means a closer match. This natively aligns with top-k logic.
+    """
+    if metric.lower() == 'cosine':
+        # Normalize vectors and calculate dot product
+        h2_norm = F.normalize(h2, p=2, dim=1)
+        centers_norm = F.normalize(centers, p=2, dim=1)
+        # Result matrix shape: (Batch_size, Num_classes)
+        scores = torch.mm(h2_norm, centers_norm.t()) 
+    elif metric.lower() == 'l2':
+        # Euclidean distance
+        # Result matrix shape: (Batch_size, Num_classes)
+        dist = torch.cdist(h2, centers, p=2.0)
+        # Negate the L2 distance: smallest distance becomes the highest mathematical score
+        scores = -dist 
+    else:
+        raise ValueError("DISTANCE_METRIC must be 'l2' or 'cosine'")
+    
+    return scores
+
+def get_predictions(scores, labels, top_k=1, use_top_k=False):
+    """
+    Returns predictions based on top-1 or top-k logic using provided scores.
     """
     if not use_top_k or top_k <= 1:
-        _, preds = torch.max(logits, 1)
+        _, preds = torch.max(scores, 1)
         return preds
     
-    # Ensure top_k isn't larger than the number of classes we actually have
-    actual_top_k = min(top_k, logits.size(1))
-    _, top_k_preds = torch.topk(logits, actual_top_k, dim=1)
+    actual_top_k = min(top_k, scores.size(1))
+    _, top_k_preds = torch.topk(scores, actual_top_k, dim=1)
     
     labels_expanded = labels.view(-1, 1)
-    
-    # Check if the true label is present anywhere in the top-k predictions
     correct_in_top_k = (top_k_preds == labels_expanded).any(dim=1)
     
-    # If correct in top-k, use the true label (counts as True Positive)
-    # Otherwise, fall back to the top-1 prediction (counts as an error)
     top_1_preds = top_k_preds[:, 0]
     final_preds = torch.where(correct_in_top_k, labels, top_1_preds)
     
     return final_preds
 
-def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz):
+# ADAM CHANGED: Added centers_kpca and centers_tsne to accurately plot superclass training centers
+def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz, centers_kpca=None, centers_tsne=None, le=None):
     base_subclasses =[
         'Bus', 'Dump Truck', 'Tractor', 
         'Truck Tractor', 'Excavator', 
@@ -181,13 +225,21 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
     )
     for cls in unique_superclasses:
         if cls in y_test_viz_super:
-            cls_points = X_kpca[y_test_viz_super == cls]
-            center_x, center_y = np.mean(cls_points[:, 0]), np.mean(cls_points[:, 1])
+            # Check if we have the projected Train Centers available
+            if centers_kpca is not None and le is not None:
+                superclass_classes =[c for c in le.classes_ if ('Base' if c in base_subclasses else 'Novel') == cls]
+                superclass_indices = le.transform(superclass_classes)
+                center_x = np.mean(centers_kpca[superclass_indices, 0])
+                center_y = np.mean(centers_kpca[superclass_indices, 1])
+            else:
+                cls_points = X_kpca[y_test_viz_super == cls]
+                center_x, center_y = np.mean(cls_points[:, 0]), np.mean(cls_points[:, 1])
+                
             axes[0].scatter(center_x, center_y, marker='*', s=800, color=super_palette[cls], edgecolor='black', zorder=10)
-            axes[0].annotate(f"{cls} Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
+            axes[0].annotate(f"{cls} Train Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
                              fontsize=12, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
 
-    axes[0].set_title('Kernel PCA: Base vs Novel Classes', fontsize=14, fontweight='bold')
+    axes[0].set_title('Kernel PCA: Base vs Novel Classes (Train Centers)', fontsize=14, fontweight='bold')
     axes[0].set_xlabel('Principal Component 1')
     axes[0].set_ylabel('Principal Component 2')
     axes[0].legend(title='Superclass', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -198,13 +250,21 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
     )
     for cls in unique_superclasses:
         if cls in y_test_viz_super:
-            cls_points = X_tsne[y_test_viz_super == cls]
-            center_x, center_y = np.median(cls_points[:, 0]), np.median(cls_points[:, 1])
+            # Check if we have the projected Train Centers available
+            if centers_tsne is not None and le is not None:
+                superclass_classes =[c for c in le.classes_ if ('Base' if c in base_subclasses else 'Novel') == cls]
+                superclass_indices = le.transform(superclass_classes)
+                center_x = np.mean(centers_tsne[superclass_indices, 0])
+                center_y = np.mean(centers_tsne[superclass_indices, 1])
+            else:
+                cls_points = X_tsne[y_test_viz_super == cls]
+                center_x, center_y = np.median(cls_points[:, 0]), np.median(cls_points[:, 1])
+                
             axes[1].scatter(center_x, center_y, marker='*', s=800, color=super_palette[cls], edgecolor='black', zorder=10)
-            axes[1].annotate(f"{cls} Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
+            axes[1].annotate(f"{cls} Train Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
                              fontsize=12, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
 
-    axes[1].set_title('t-SNE Map: Base vs Novel Classes', fontsize=14, fontweight='bold')
+    axes[1].set_title('t-SNE Map: Base vs Novel Classes (Train Centers)', fontsize=14, fontweight='bold')
     axes[1].set_xlabel('t-SNE Dimension 1')
     axes[1].set_ylabel('t-SNE Dimension 2')
 
@@ -220,6 +280,7 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
 def main():
     print("="*50)
     print(f"Metrics Mode: Top-{TOP_K_VALUE} Accuracy Enabled: {USE_TOP_K_METRICS}")
+    print(f"Prediction Mode: Prototypes: {USE_PROTOTYPE_PREDICTIONS} | Distance: {DISTANCE_METRIC.upper()}")
     print("="*50)
 
     train_base_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/base_class'
@@ -315,8 +376,6 @@ def main():
         train_dataset = TensorDataset(torch.FloatTensor(X_tr), torch.LongTensor(y_tr))
         val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
         
-        
-
         # Base Raw Class weights
         print("\nCalculating Base Class Weights...")
         raw_class_weights = compute_class_weight('balanced', classes=np.unique(y_train_encoded), y=y_train_encoded)
@@ -324,10 +383,8 @@ def main():
         # ==============================================================
         # OPTUNA HYPERPARAMETER SEARCH
         # ==============================================================
-        # Get the integer index for the 'Trailer' class
         novel_class_idx = le.transform(['Trailer'])[0]
         def objective(trial):
-            # 1. Suggest hyperparameters
             batch_size = trial.suggest_categorical('batch_size',[256, 512, 1024, 2048, 4096])
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
             center_weight = trial.suggest_float('center_weight', 0.005, 0.1, log=True)
@@ -335,14 +392,10 @@ def main():
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
 
-            # Let Optuna find the perfect Alpha booster for the Novel class
             novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
 
             smoothed_weights = np.power(raw_class_weights, weight_smoothing)
-
-            # Explicitly boost the Trailer (Novel) class weight
             smoothed_weights[novel_class_idx] *= novel_multiplier
-
             class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
             trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
@@ -355,7 +408,6 @@ def main():
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-            # Track Best Metric (Maximize)
             best_val_metric = -1.0 
             epochs_no_improve = 0
             search_patience = 50
@@ -381,7 +433,11 @@ def main():
                         param.grad.data *= (1. / center_weight)
                     optimizer_center.step()
                     
-                # Validation loop to calculate F1 Score
+                # NEW: Calculate training centers for validation if active
+                if USE_PROTOTYPE_PREDICTIONS:
+                    train_centers = compute_train_centers(trial_model, train_loader, num_classes, device)
+
+                # Validation loop
                 trial_model.eval()
                 all_preds =[]
                 all_labels =[]
@@ -389,14 +445,18 @@ def main():
                 with torch.no_grad():
                     for features, labels in val_loader:
                         features, labels = features.to(device), labels.to(device)
-                        logits, _ = trial_model(features)
+                        logits, hidden_feats = trial_model(features)
                         
-                        # NEW: Extracted prediction logic to handle Top-K predictions
-                        preds = get_predictions(logits, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+                        # Apply Distance Prototype scores OR Fallback to standard Logits
+                        if USE_PROTOTYPE_PREDICTIONS:
+                            scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
+                        else:
+                            scores = logits
+
+                        preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
                         all_preds.extend(preds.cpu().numpy())
                         all_labels.extend(labels.cpu().numpy())
                 
-                # Calculate F1 Scores based on assigned Top-K predictions
                 f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, zero_division=0)
                 novel_f2 = f2_scores[novel_class_idx]
 
@@ -404,30 +464,29 @@ def main():
                 macro_f1 = np.mean(f1_scores)
                 novel_f1 = f1_scores[novel_class_idx]
                 
-                # THE SECRET SAUCE: Create a custom reward metric
-                # 75% focus on improving the Novel Class, 25% focus on keeping Base Classes healthy
-                # custom_metric = (0.80 * novel_f2) + (0.20 * macro_f1) ### ADAM CHANGED
-                custom_metric = novel_f1
+                if CUSTOM_METRIC_TYPE == 'f1_novel':
+                    custom_metric = novel_f1
+                elif CUSTOM_METRIC_TYPE == 'f2_novel':
+                    custom_metric = novel_f2
+                else:
+                    custom_metric = (0.80 * novel_f2) + (0.20 * macro_f1) ### ADAM CHANGED
+
                 
-                # Maximize the custom metric
                 if custom_metric > best_val_metric:
                     best_val_metric = custom_metric
                     epochs_no_improve = 0
                 else:
                     epochs_no_improve += 1
 
-                # Optuna Early Pruning
                 trial.report(custom_metric, epoch)
                 if trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
                 
-                # Early Stopping
                 if epochs_no_improve >= search_patience:
                     break
                     
             return best_val_metric
 
-        # Run Study
         file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
         if not os.path.exists(file_path):
             print("\n" + "="*50)
@@ -444,7 +503,6 @@ def main():
 
             best_params = study.best_params
             file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
-            # Dump the dictionary into the file
             with open(file_path, 'w') as f:
                 json.dump(best_params, f, indent=4)
 
@@ -458,17 +516,15 @@ def main():
                 print("+"*30)
                 print(f"Found parameter: {best_params}")
         
-        final_batch_size = best_params.get('batch_size', 2048) # Default to 2048 if not found
+        final_batch_size = best_params.get('batch_size', 2048)
         train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
 
-        # Setup final dynamically smoothed weights
         smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
         if 'novel_multiplier' in best_params:
             smoothed_weights[novel_class_idx] *= best_params['novel_multiplier']
         class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
-        # Final Setup
         criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
         criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
         final_center_weight = best_params['center_weight']
@@ -481,7 +537,6 @@ def main():
         patience = 50
         best_val_metric = -1.0
         epochs_no_improve = 0
-        novel_class_idx = le.transform(['Trailer'])[0]
 
         for epoch in range(MAX_EPOCHS):
             model.train()
@@ -507,6 +562,10 @@ def main():
                 
                 train_loss += loss.item()
                 
+            # Calculation of Validation prototypes if active
+            if USE_PROTOTYPE_PREDICTIONS:
+                train_centers = compute_train_centers(model, train_loader, num_classes, device)
+
             model.eval()
             all_preds =[]
             all_labels =[]
@@ -521,30 +580,35 @@ def main():
                     loss = loss_focal + final_center_weight * loss_center
                     val_loss += loss.item()
 
-                    # Track predictions for Custom Metric using Top-K logic
-                    preds = get_predictions(logits, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+                    # Apply Distance Prototype scores OR Fallback to standard Logits
+                    if USE_PROTOTYPE_PREDICTIONS:
+                        scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
+                    else:
+                        scores = logits
+
+                    preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
                     all_preds.extend(preds.cpu().numpy())
                     all_labels.extend(labels.cpu().numpy())
             
             val_loss /= len(val_loader)
 
-            # --- CALCULATE CUSTOM METRIC FOR EARLY STOPPING ---
             f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, zero_division=0) 
             f1_scores = f1_score(all_labels, all_preds, average=None, zero_division=0)
-            
+            novel_f1 = f1_scores[novel_class_idx] 
             novel_f2 = f2_scores[novel_class_idx] 
             macro_f1 = np.mean(f1_scores)
             
-            # This is what we actually care about now
-            custom_metric = (0.80 * novel_f2) + (0.20 * macro_f1) 
-            
+            if CUSTOM_METRIC_TYPE == 'f1_novel':
+                custom_metric = novel_f1
+            elif CUSTOM_METRIC_TYPE == 'f2_novel':
+                custom_metric = novel_f2
+            else:
+                custom_metric = (0.80 * novel_f2) + (0.20 * macro_f1) ### ADAM CHANGED
             scheduler.step(custom_metric)
-
 
             if (epoch+1) % 10 == 0:
                 print(f"Epoch [{epoch+1}/{MAX_EPOCHS}], Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}")
 
-            # NEW: Save model based on MAXIMIZING the custom metric
             if custom_metric > best_val_metric + 1e-4: 
                 best_val_metric = custom_metric
                 epochs_no_improve = 0
@@ -553,24 +617,37 @@ def main():
                 epochs_no_improve += 1
                 
             if epochs_no_improve >= patience:
-                print(f"Early stopping triggered at epoch {epoch+1} (No improvement in Novel F2/Metric)")
+                print(f"Early stopping triggered at epoch {epoch+1} (No improvement in Custom Metric)")
                 break
                 
         torch.save(model.state_dict(), last_model_file)
         print("Training Complete! Saved best and last models.")
         
-        # Load best weights for evaluation
         model.load_state_dict(torch.load(best_model_file))
         model.eval()
 
-    # --- 4. DETAILED METRICS CALCULATION ---
+    # --- 4. DETAILED METRICS CALCULATION (Final Dataset) ---
+    # Re-create a Data Loader strictly for the Final Evaluation Prototypes if needed
+    final_train_dataset = TensorDataset(torch.FloatTensor(X_train_scaled), torch.LongTensor(y_train_encoded))
+    final_train_loader = DataLoader(final_train_dataset, batch_size=2048, shuffle=False)
+
+    # Compute training centers unconditionally here as they will be needed for the plot
+    train_centers = compute_train_centers(model, final_train_loader, num_classes, device)
+    train_centers_np = train_centers.cpu().numpy() # Converting to numpy to pass to TSNE/KPCA later
+
     X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
     y_test_tensor = torch.LongTensor(y_test_encoded).to(device)
 
     with torch.no_grad():
         test_logits, X_separated_features_all = model(X_test_tensor)
-        # Apply Top-K extraction
-        y_pred_encoded = get_predictions(test_logits, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+
+        # Apply Distance Prototype scores OR Fallback to standard Logits
+        if USE_PROTOTYPE_PREDICTIONS:
+            scores = compute_prototype_scores(X_separated_features_all, train_centers, metric=DISTANCE_METRIC)
+        else:
+            scores = test_logits
+
+        y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
         y_pred_encoded = y_pred_encoded.cpu().numpy()
         X_separated_features_all = X_separated_features_all.cpu().numpy()
 
@@ -586,7 +663,8 @@ def main():
     file_path = os.path.join(PLOT_DIR, 'Classification_Report_CHECK_ADAM.txt')
     report = classification_report(y_test, y_pred, digits=4)
     with open(file_path, "w") as f:
-        f.write(f"\nOverall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%\n")
+        f.write(f"Prediction Mode: Prototypes ({DISTANCE_METRIC.upper()})\n")
+        f.write(f"Overall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%\n")
         f.write(report)
         print(report)
 
@@ -609,16 +687,29 @@ def main():
     X_separated_features = np.array(X_features_viz)
 
     # --- 7. Dimensionality Reduction ---
+    print("Applying Dimensionality Reduction on Combined Data (Validation + Train Centers)...")
+    
+    # We concatenate the validation points with the training centers so they get mapped together into 2D
+    combined_features = np.vstack([X_separated_features, train_centers_np])
+
     print("Applying Kernel PCA (RBF)...")
     kpca = KernelPCA(n_components=2, kernel='rbf', gamma=None) 
-    X_kpca = kpca.fit_transform(X_separated_features)
+    combined_kpca = kpca.fit_transform(combined_features)
+    
+    # Split the results back apart:
+    X_kpca = combined_kpca[:-num_classes]           # First N rows are validation samples
+    centers_kpca = combined_kpca[-num_classes:]     # Last num_classes rows are the Train Centers
 
     print("Applying t-SNE...")
     tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    X_tsne = tsne.fit_transform(X_separated_features)
+    combined_tsne = tsne.fit_transform(combined_features)
+    
+    # Split the results back apart:
+    X_tsne = combined_tsne[:-num_classes]           # First N rows are validation samples
+    centers_tsne = combined_tsne[-num_classes:]     # Last num_classes rows are the Train Centers
 
     # --- 8. Plotting ---
-    print("Plotting graphs and calculating Prototype centers...")
+    print("Plotting graphs with Training Prototype centers...")
     sns.set_theme(style="whitegrid")
     fig, axes = plt.subplots(1, 2, figsize=(22, 10))
     unique_classes = np.unique(y_test_viz)
@@ -631,13 +722,15 @@ def main():
         hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None
     )
     for cls in unique_classes:
-        cls_points = X_kpca[y_test_viz == cls]
-        center_x, center_y = np.mean(cls_points[:, 0]), np.mean(cls_points[:, 1])
+        # Instead of getting the mean of validation points, retrieve the projected Train Center!
+        cls_idx = le.transform([cls])[0]
+        center_x, center_y = centers_kpca[cls_idx]
+        
         axes[0].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[0].annotate(cls, (center_x, center_y), xytext=(8, 8), textcoords='offset points',
+        axes[0].annotate(f"{cls} (Train Center)", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
                          fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
 
-    axes[0].set_title('Kernel PCA (RBF) with Cluster Labels', fontsize=14, fontweight='bold')
+    axes[0].set_title('Kernel PCA (RBF) with Train Prototype Centers', fontsize=14, fontweight='bold')
     axes[0].set_xlabel('Principal Component 1')
     axes[0].set_ylabel('Principal Component 2')
     axes[0].legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -647,13 +740,15 @@ def main():
         hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False
     )
     for cls in unique_classes:
-        cls_points = X_tsne[y_test_viz == cls]
-        center_x, center_y = np.median(cls_points[:, 0]), np.median(cls_points[:, 1])
+        # Instead of getting the mean of validation points, retrieve the projected Train Center!
+        cls_idx = le.transform([cls])[0]
+        center_x, center_y = centers_tsne[cls_idx]
+        
         axes[1].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[1].annotate(cls, (center_x, center_y), xytext=(8, 8), textcoords='offset points',
+        axes[1].annotate(f"{cls} (Train Center)", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
                          fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
 
-    axes[1].set_title('t-SNE Map with Cluster Labels (Prototypes)', fontsize=14, fontweight='bold')
+    axes[1].set_title('t-SNE Map with Train Prototype Centers', fontsize=14, fontweight='bold')
     axes[1].set_xlabel('t-SNE Dimension 1')
     axes[1].set_ylabel('t-SNE Dimension 2')
 
@@ -663,7 +758,11 @@ def main():
     print("Done! Saved plot as 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'")
 
     # === 9. Base vs Novel Evaluation and Visualization ===
-    evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz)
+    # ADAM CHANGED: Pass the projected 2D centers and the label encoder to calculate the correct superclass train center
+    evaluate_and_visualize_superclasses(
+        y_test, y_pred, X_kpca, X_tsne, y_test_viz, 
+        centers_kpca=centers_kpca, centers_tsne=centers_tsne, le=le
+    )
 
 if __name__ == "__main__":
     main()

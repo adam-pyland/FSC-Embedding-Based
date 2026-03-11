@@ -1,0 +1,14 @@
+Prediction Mode: Prototypes (L2)
+Overall Validation Set Accuracy (Top-1): 62.43%
+              precision    recall  f1-score   support
+
+         Bus     0.2185    0.7112    0.3343       329
+ Cargo Truck     0.8090    0.5527    0.6567      3510
+  Dump Truck     0.7216    0.7508    0.7359      2548
+   Excavator     0.4490    0.6617    0.5350       133
+     Tractor     0.3065    0.5429    0.3918       210
+     Trailer     0.3031    0.3441    0.3223       311
+
+    accuracy                         0.6243      7041
+   macro avg     0.4679    0.5939    0.4960      7041
+weighted avg     0.7057    0.6243    0.6453      7041
