@@ -1,0 +1,17 @@
+========================================
+TOP-K EVALUATION STATISTICS
+Target Class: Trailer
+Prediction Mode: COSINE
+========================================
+
+Total Ground Truth Samples Evaluated: 311
+
+Samples ranked as TOP-1: 47
+Samples ranked as TOP-2: 72
+Samples ranked as TOP-3: 189
+Samples NOT in Top-3 : 3
+
+----------------------------------------
+Top-1 Accuracy for Trailer: 15.11%
+Top-2 Accuracy for Trailer: 38.26%
+Top-3 Accuracy for Trailer: 99.04%

@@ -1,0 +1,15 @@
+Prediction Mode: Prototypes (COSINE)
+Loss Combination : FOCAL_CENTER
+Overall Validation Set Accuracy (Top-3): 91.98%
+              precision    recall  f1-score   support
+
+         Bus     0.9642    0.9818    0.9729       329
+ Cargo Truck     0.9271    0.9638    0.9451      3510
+  Dump Truck     0.9442    0.8705    0.9059      2548
+   Excavator     0.5618    0.7519    0.6431       133
+     Tractor     0.7619    0.6857    0.7218       210
+     Trailer     0.9032    0.9904    0.9448       311
+
+    accuracy                         0.9198      7041
+   macro avg     0.8437    0.8740    0.8556      7041
+weighted avg     0.9222    0.9198    0.9198      7041

@@ -38,7 +38,7 @@ except ImportError:
 # ==========================================
 
 # Top-K Metrics
-USE_TOP_K_METRICS = False
+USE_TOP_K_METRICS = True
 TOP_K_VALUE = 3
 
 # Prediction & Distance Metrics
@@ -51,8 +51,8 @@ LOSS_COMBINATION = 'focal_center'
 
 CUSTOM_METRIC_TYPE = 'f2_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
 
-SAVE_DIR = f"models/MLP-Pytorch-Few-Shots-{'Focal' if LOSS_COMBINATION == 'focal_center' else ('Triplet' if LOSS_COMBINATION == 'triplet_center' else 'Focal-Triplet')}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
-PLOT_DIR = f"Outputs/MLP-Pytorch-Few-Shots-{'Focal' if LOSS_COMBINATION == 'focal_center' else ('Triplet' if LOSS_COMBINATION == 'triplet_center' else 'Focal-Triplet')}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-Based"
+SAVE_DIR = f"models/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
+PLOT_DIR = f"Outputs/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 MAX_EPOCHS = 500
@@ -79,9 +79,7 @@ class MLP_PyTorch(nn.Module):
         h1 = F.relu(self.fc1(x))
         h2 = F.relu(self.fc2(h1))
         logits = self.fc3(h2)
-        # L2 Normalize the features so Cosine and L2 behave similarly
-        h2_normalized = F.normalize(h2, p=2, dim=1)
-        return logits, h2_normalized  # Returning h2 to extract the 256-D features easily
+        return logits, h2  # Returning h2 to extract the 256-D features easily
     
 
 class FocalLoss(nn.Module):
@@ -386,7 +384,6 @@ def main():
         model.eval()
         scaler = load(scaler_file)
         le = load(le_file)
-        X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
     else:
         print("\nNo saved model found. Preparing for Training...")
@@ -417,10 +414,10 @@ def main():
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
             center_weight = trial.suggest_float('center_weight', 0.005, 0.1, log=True)
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
-            weight_decay = trial.suggest_float('weight_decay', 1e-3, 5e-2, log=True)
+            weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
 
-            novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 5.0)
+            novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
 
             smoothed_weights = np.power(raw_class_weights, weight_smoothing)
             smoothed_weights[novel_class_idx] *= novel_multiplier
@@ -437,23 +434,7 @@ def main():
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
             optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-
-            # Create class weights for sampling
-            class_sample_counts = np.bincount(y_tr)
-            # Inverse frequency weighting
-            weights = 1.0 / class_sample_counts
-            sample_weights = weights[y_tr]
-
-            # Create the PyTorch Sampler
-            sampler = torch.utils.data.WeightedRandomSampler(
-                weights=sample_weights,
-                num_samples=len(sample_weights),
-                replacement=True
-            )
-
-            # IMPORTANT: Remove 'shuffle=True' when using a sampler
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
-            # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
             best_val_metric = -1.0 
@@ -571,22 +552,7 @@ def main():
                 print(f"Found parameter: {best_params}")
         
         final_batch_size = best_params.get('batch_size', 2048)
-        # Create class weights for sampling
-        class_sample_counts = np.bincount(y_tr)
-        # Inverse frequency weighting
-        weights = 1.0 / class_sample_counts
-        sample_weights = weights[y_tr]
-
-        # Create the PyTorch Sampler
-        sampler = torch.utils.data.WeightedRandomSampler(
-            weights=sample_weights,
-            num_samples=len(sample_weights),
-            replacement=True
-        )
-
-        # IMPORTANT: Remove 'shuffle=True' when using a sampler
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
-        # train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
 
         smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])

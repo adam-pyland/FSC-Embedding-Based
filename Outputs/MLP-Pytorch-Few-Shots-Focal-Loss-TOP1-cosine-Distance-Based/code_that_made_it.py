@@ -437,23 +437,7 @@ def main():
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
             optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-
-            # Create class weights for sampling
-            class_sample_counts = np.bincount(y_tr)
-            # Inverse frequency weighting
-            weights = 1.0 / class_sample_counts
-            sample_weights = weights[y_tr]
-
-            # Create the PyTorch Sampler
-            sampler = torch.utils.data.WeightedRandomSampler(
-                weights=sample_weights,
-                num_samples=len(sample_weights),
-                replacement=True
-            )
-
-            # IMPORTANT: Remove 'shuffle=True' when using a sampler
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
-            # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
             best_val_metric = -1.0 
@@ -571,22 +555,7 @@ def main():
                 print(f"Found parameter: {best_params}")
         
         final_batch_size = best_params.get('batch_size', 2048)
-        # Create class weights for sampling
-        class_sample_counts = np.bincount(y_tr)
-        # Inverse frequency weighting
-        weights = 1.0 / class_sample_counts
-        sample_weights = weights[y_tr]
-
-        # Create the PyTorch Sampler
-        sampler = torch.utils.data.WeightedRandomSampler(
-            weights=sample_weights,
-            num_samples=len(sample_weights),
-            replacement=True
-        )
-
-        # IMPORTANT: Remove 'shuffle=True' when using a sampler
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
-        # train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
 
         smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
