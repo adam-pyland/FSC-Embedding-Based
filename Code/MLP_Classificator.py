@@ -37,17 +37,12 @@ except ImportError:
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-# KNN Configuration (NEW)
-USE_KNN = True         # Set to True to use KNN, False to use Prototypes/Logits
-KNN_K = 5              # Recommended 5 for ~100 sparse samples
-
 # Top-K Metrics
-USE_TOP_K_METRICS = False
+USE_TOP_K_METRICS = True
 TOP_K_VALUE = 3
 
 # Prediction & Distance Metrics
 # Options: 'l2' (Euclidean), 'cosine' (Cosine similarity), or 'logits' (MLP Output Scores)
-# Note: If USE_KNN = True, this metric defines how the K-nearest neighbors are found.
 DISTANCE_METRIC = 'cosine'             
 
 # Loss Function Combinations
@@ -56,10 +51,8 @@ LOSS_COMBINATION = 'focal_center'
 
 CUSTOM_METRIC_TYPE = 'f2_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
 
-# Dynamic Naming for Save directories
-_pred_mode_str = "KNN" if USE_KNN else ("Logits" if DISTANCE_METRIC == 'logits' else 'Prototypes')
-SAVE_DIR = f"models/MLP-Pytorch-Few-Shots-{'Focal' if LOSS_COMBINATION == 'focal_center' else ('Triplet' if LOSS_COMBINATION == 'triplet_center' else 'Focal-Triplet')}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{_pred_mode_str}-Based"
-PLOT_DIR = f"Outputs/MLP-Pytorch-Few-Shots-{'Focal' if LOSS_COMBINATION == 'focal_center' else ('Triplet' if LOSS_COMBINATION == 'triplet_center' else 'Focal-Triplet')}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{_pred_mode_str}-Based"
+SAVE_DIR = f"models/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
+PLOT_DIR = f"Outputs/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 MAX_EPOCHS = 500
@@ -86,9 +79,7 @@ class MLP_PyTorch(nn.Module):
         h1 = F.relu(self.fc1(x))
         h2 = F.relu(self.fc2(h1))
         logits = self.fc3(h2)
-        # L2 Normalize the features so Cosine and L2 behave similarly
-        h2_normalized = F.normalize(h2, p=2, dim=1)
-        return logits, h2_normalized  # Returning h2 to extract the 256-D features easily
+        return logits, h2  # Returning h2 to extract the 256-D features easily
     
 
 class FocalLoss(nn.Module):
@@ -147,7 +138,7 @@ class CenterLoss(nn.Module):
         return loss
 
 # ==========================================
-# 2. Evaluation, Distance, and KNN Helpers
+# 2. Evaluation and Distance Helpers
 # ==========================================
 
 def compute_train_centers(model, dataloader, num_classes, device):
@@ -170,22 +161,6 @@ def compute_train_centers(model, dataloader, num_classes, device):
     centers = centers / counts.unsqueeze(1)
     return centers
 
-def compute_train_features(model, dataloader, device):
-    """
-    Extracts all training features and their labels for KNN classification.
-    """
-    model.eval()
-    all_feats = []
-    all_labels =[]
-    with torch.no_grad():
-        for features, labels in dataloader:
-            features, labels = features.to(device), labels.to(device)
-            _, h2 = model(features)
-            all_feats.append(h2)
-            all_labels.append(labels)
-            
-    return torch.cat(all_feats, dim=0), torch.cat(all_labels, dim=0)
-
 def compute_prototype_scores(h2, centers, metric='cosine'):
     """
     Calculates distance/similarity to prototypes and returns a 'score'
@@ -200,38 +175,6 @@ def compute_prototype_scores(h2, centers, metric='cosine'):
         scores = -dist 
     else:
         raise ValueError("Metric must be 'l2' or 'cosine'")
-    return scores
-
-def compute_knn_scores(val_feats, train_feats, train_labels, num_classes, k=5, metric='cosine'):
-    """
-    Calculates the K-nearest neighbors for validation features against training features.
-    Returns 'scores' (class vote counts) allowing it to plug seamlessly into get_predictions().
-    """
-    if metric.lower() == 'cosine':
-        val_norm = F.normalize(val_feats, p=2, dim=1)
-        train_norm = F.normalize(train_feats, p=2, dim=1)
-        # Cosine similarity: higher is closer
-        sim = torch.mm(val_norm, train_norm.t()) 
-        topk_distances, topk_indices = torch.topk(sim, k, dim=1, largest=True)
-        weights = topk_distances 
-        
-    elif metric.lower() == 'l2':
-        dist = torch.cdist(val_feats, train_feats, p=2.0)
-        # L2 distance: lower is closer (so we negate for topk)
-        topk_distances, topk_indices = torch.topk(-dist, k, dim=1, largest=True)
-        weights = 1.0 / (-topk_distances + 1e-8)
-    else:
-        raise ValueError("Metric for KNN must be 'l2' or 'cosine'")
-        
-    # Get the labels of the top-k nearest training features
-    topk_labels = train_labels[topk_indices] # shape: (batch_size, K)
-    
-    # Cast votes into a score array of shape (batch_size, num_classes)
-    batch_size = val_feats.size(0)
-    scores = torch.zeros(batch_size, num_classes, device=val_feats.device)
-    scores.scatter_add_(1, topk_labels, torch.ones_like(topk_labels, dtype=torch.float))
-    # scores.scatter_add_(1, topk_labels, weights)
-    
     return scores
 
 def get_predictions(scores, labels, top_k=1, use_top_k=False):
@@ -353,7 +296,7 @@ def main():
 
     print("="*50)
     print(f"Metrics Mode: Top-{TOP_K_VALUE} Accuracy Enabled: {USE_TOP_K_METRICS}")
-    print(f"Prediction Mode: {'KNN (K=' + str(KNN_K) + ')' if USE_KNN else DISTANCE_METRIC.upper()}")
+    print(f"Prediction Mode: {DISTANCE_METRIC.upper()}")
     print(f"Loss Combination : {LOSS_COMBINATION.upper()}")
     print("="*50)
 
@@ -369,8 +312,7 @@ def main():
         'Cargo Truck', 'Trailer'
     ]
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
-    
-    # Create the feature embedding dataset
+
     X_train, y_train = [],[]
     X_test, y_test = [],[]
 
@@ -388,8 +330,7 @@ def main():
                     X_list.append(embedding)
                     y_list.append(safe_cls.replace("_", " ")) 
                     break
-    
-    # Loads the embedding feature vectors to lists
+
     print("Loading 100% of Training features... (This might take a minute)")
     load_features_from_dir(train_base_dir, X_train, y_train)
     load_features_from_dir(train_novel_dir, X_train, y_train)
@@ -443,17 +384,7 @@ def main():
         model.eval()
         scaler = load(scaler_file)
         le = load(le_file)
-        X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
-        file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
-                best_params = json.load(f)
-                print("+"*30)
-                print(f"Found parameter: {best_params}")
-        else:
-            raise ValueError("No hyperparameters dictionary file.")
-        final_knn_k = best_params.get('knn_k', KNN_K)
     else:
         print("\nNo saved model found. Preparing for Training...")
         scaler = StandardScaler()
@@ -483,15 +414,10 @@ def main():
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
             center_weight = trial.suggest_float('center_weight', 0.005, 0.1, log=True)
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
-            weight_decay = trial.suggest_float('weight_decay', 1e-3, 5e-2, log=True)
+            weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
 
-            novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 5.0)
-            # === NEW: Optuna Search for KNN K ===
-            if USE_KNN:
-                trial_knn_k = trial.suggest_int('knn_k', 1, 21, step=2) # Tests 1, 3, 5, 7 ... 21
-            else:
-                trial_knn_k = KNN_K # Fallback if KNN is disabled
+            novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
 
             smoothed_weights = np.power(raw_class_weights, weight_smoothing)
             smoothed_weights[novel_class_idx] *= novel_multiplier
@@ -508,21 +434,7 @@ def main():
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
             optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-            # Create class weights for sampling
-            class_sample_counts = np.bincount(y_tr)
-            # Inverse frequency weighting
-            weights = 1.0 / class_sample_counts
-            sample_weights = weights[y_tr]
-
-            # Create the PyTorch Sampler
-            sampler = torch.utils.data.WeightedRandomSampler(
-                weights=sample_weights,
-                num_samples=len(sample_weights),
-                replacement=True
-            )
-
-            # IMPORTANT: Remove 'shuffle=True' when using a sampler
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
             best_val_metric = -1.0 
@@ -557,10 +469,8 @@ def main():
                         param.grad.data *= (1. / center_weight)
                     optimizer_center.step()
                     
-                # Setup Features/Centers for Evaluation
-                if USE_KNN:
-                    train_feats_all, train_labels_all = compute_train_features(trial_model, train_loader, device)
-                elif DISTANCE_METRIC in ['l2', 'cosine']:
+                # Calculate training centers for validation if using distance metrics natively
+                if DISTANCE_METRIC in ['l2', 'cosine']:
                     train_centers = compute_train_centers(trial_model, train_loader, num_classes, device)
 
                 # Validation loop
@@ -573,9 +483,7 @@ def main():
                         features, labels = features.to(device), labels.to(device)
                         logits, hidden_feats = trial_model(features)
                         
-                        if USE_KNN:
-                            scores = compute_knn_scores(hidden_feats, train_feats_all, train_labels_all, num_classes, k=trial_knn_k, metric=DISTANCE_METRIC)
-                        elif DISTANCE_METRIC in['l2', 'cosine']:
+                        if DISTANCE_METRIC in ['l2', 'cosine']:
                             scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
                         elif DISTANCE_METRIC == 'logits':
                             scores = logits
@@ -584,7 +492,7 @@ def main():
                         all_preds.extend(preds.cpu().numpy())
                         all_labels.extend(labels.cpu().numpy())
                 
-                f2_scores = fbeta_score(all_labels, all_preds, beta=4, average=None, zero_division=0)
+                f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, zero_division=0)
                 novel_f2 = f2_scores[novel_class_idx]
 
                 f1_scores = f1_score(all_labels, all_preds, average=None, zero_division=0)
@@ -644,24 +552,7 @@ def main():
                 print(f"Found parameter: {best_params}")
         
         final_batch_size = best_params.get('batch_size', 2048)
-
-        # === NEW: Extract Best K ===
-        final_knn_k = best_params.get('knn_k', KNN_K)
-        if USE_KNN:
-            print(f"-> Using Optimal KNN K = {final_knn_k} found by Optuna")
-        
-        # Create class weights for sampling
-        class_sample_counts = np.bincount(y_tr)
-        weights = 1.0 / class_sample_counts
-        sample_weights = weights[y_tr]
-
-        sampler = torch.utils.data.WeightedRandomSampler(
-            weights=sample_weights,
-            num_samples=len(sample_weights),
-            replacement=True
-        )
-
-        train_loader = DataLoader(train_dataset, batch_size=final_batch_size, sampler=sampler)
+        train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
 
         smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
@@ -715,10 +606,8 @@ def main():
                 
                 train_loss += loss.item()
                 
-            # Setup Features/Centers for Evaluation
-            if USE_KNN:
-                train_feats_all, train_labels_all = compute_train_features(model, train_loader, device)
-            elif DISTANCE_METRIC in ['l2', 'cosine']:
+            # Calculation of Validation prototypes if active
+            if DISTANCE_METRIC in ['l2', 'cosine']:
                 train_centers = compute_train_centers(model, train_loader, num_classes, device)
 
             model.eval()
@@ -733,7 +622,7 @@ def main():
                     loss_center = criterion_center(hidden_feats, labels)
                     loss = final_center_weight * loss_center
                     
-                    if LOSS_COMBINATION in['focal_center', 'focal_triplet_center']:
+                    if LOSS_COMBINATION in ['focal_center', 'focal_triplet_center']:
                         loss += criterion_focal(logits, labels)
                     if LOSS_COMBINATION in['triplet_center', 'focal_triplet_center']:
                         hard_pairs = miner(hidden_feats, labels)
@@ -741,9 +630,7 @@ def main():
 
                     val_loss += loss.item()
 
-                    if USE_KNN:
-                        scores = compute_knn_scores(hidden_feats, train_feats_all, train_labels_all, num_classes, k=final_knn_k, metric=DISTANCE_METRIC)
-                    elif DISTANCE_METRIC in['l2', 'cosine']:
+                    if DISTANCE_METRIC in ['l2', 'cosine']:
                         scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
                     elif DISTANCE_METRIC == 'logits':
                         scores = logits
@@ -754,7 +641,7 @@ def main():
             
             val_loss /= len(val_loader)
 
-            f2_scores = fbeta_score(all_labels, all_preds, beta=4, average=None, zero_division=0) 
+            f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, zero_division=0) 
             f1_scores = f1_score(all_labels, all_preds, average=None, zero_division=0)
             novel_f1 = f1_scores[novel_class_idx] 
             novel_f2 = f2_scores[novel_class_idx] 
@@ -796,18 +683,13 @@ def main():
     train_centers = compute_train_centers(model, final_train_loader, num_classes, device)
     train_centers_np = train_centers.cpu().numpy()
 
-    if USE_KNN:
-        final_train_feats_all, final_train_labels_all = compute_train_features(model, final_train_loader, device)
-
     X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
     y_test_tensor = torch.LongTensor(y_test_encoded).to(device)
 
     with torch.no_grad():
         test_logits, X_separated_features_all = model(X_test_tensor)
 
-        if USE_KNN:
-            scores = compute_knn_scores(X_separated_features_all, final_train_feats_all, final_train_labels_all, num_classes, k=final_knn_k, metric=DISTANCE_METRIC)
-        elif DISTANCE_METRIC in ['l2', 'cosine']:
+        if DISTANCE_METRIC in['l2', 'cosine']:
             scores = compute_prototype_scores(X_separated_features_all, train_centers, metric=DISTANCE_METRIC)
         elif DISTANCE_METRIC == 'logits':
             scores = test_logits
@@ -828,7 +710,7 @@ def main():
     file_path = os.path.join(PLOT_DIR, 'Classification_Report_CHECK_ADAM.txt')
     report = classification_report(y_test, y_pred, digits=4)
     with open(file_path, "w") as f:
-        mode_str = f"KNN (K={final_knn_k}, metric={DISTANCE_METRIC})" if USE_KNN else ("MLP Logits" if DISTANCE_METRIC == 'logits' else f"Prototypes ({DISTANCE_METRIC.upper()})")
+        mode_str = "MLP Logits" if DISTANCE_METRIC == 'logits' else f"Prototypes ({DISTANCE_METRIC.upper()})"
         f.write(f"Prediction Mode: {mode_str}\n")
         f.write(f"Loss Combination : {LOSS_COMBINATION.upper()}\n")
         f.write(f"Overall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%\n")

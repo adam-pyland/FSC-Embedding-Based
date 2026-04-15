@@ -1,17 +1,28 @@
 ========================================
-TOP-K EVALUATION STATISTICS
-Target Class: Trailer
+PREDICTION-BASED TOP-K STATISTICS
+Target Class Evaluated: Trailer
 Prediction Mode: COSINE
 ========================================
 
-Total Ground Truth Samples Evaluated: 311
+Total Validation Samples Evaluated: 7041
 
-Samples ranked as TOP-1: 47
-Samples ranked as TOP-2: 72
-Samples ranked as TOP-3: 189
-Samples NOT in Top-3 : 3
+--- TOP-1 Category ---
+Total objects scored into this category: 151
+Objects actually belonging to ground truth 'Trailer': 47
+Accuracy (Real / Total) within category: 31.13%
 
-----------------------------------------
-Top-1 Accuracy for Trailer: 15.11%
-Top-2 Accuracy for Trailer: 38.26%
-Top-3 Accuracy for Trailer: 99.04%
+--- TOP-2 Category ---
+Total objects scored into this category: 1972
+Objects actually belonging to ground truth 'Trailer': 72
+Accuracy (Real / Total) within category: 3.65%
+
+--- TOP-3 Category ---
+Total objects scored into this category: 4768
+Objects actually belonging to ground truth 'Trailer': 189
+Accuracy (Real / Total) within category: 3.96%
+
+--- Not in TOP-3 Category ---
+Total objects scored into this category: 150
+Objects actually belonging to ground truth 'Trailer': 3
+Accuracy (Real / Total) within category: 2.00%
+

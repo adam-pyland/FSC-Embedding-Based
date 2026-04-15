@@ -369,8 +369,7 @@ def main():
         'Cargo Truck', 'Trailer'
     ]
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
-    
-    # Create the feature embedding dataset
+
     X_train, y_train = [],[]
     X_test, y_test = [],[]
 
@@ -388,8 +387,7 @@ def main():
                     X_list.append(embedding)
                     y_list.append(safe_cls.replace("_", " ")) 
                     break
-    
-    # Loads the embedding feature vectors to lists
+
     print("Loading 100% of Training features... (This might take a minute)")
     load_features_from_dir(train_base_dir, X_train, y_train)
     load_features_from_dir(train_novel_dir, X_train, y_train)

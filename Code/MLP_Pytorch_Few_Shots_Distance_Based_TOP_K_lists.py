@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, TensorDataset
 DISTANCE_METRIC = 'cosine'
 
 # Set the target class to track (e.g., 'Trailer'). 
-# If you want to track ALL classes collectively, set this to None.
+# Must be set to evaluate prediction-based rankings.
 TARGET_EVAL_CLASS = 'Trailer'
 
 # Directories (Change these if they differ from your environment)
@@ -113,10 +113,13 @@ def load_features_and_filenames(directory, X_list, y_list, filenames_list):
 # ==========================================
 
 def main():
+    if TARGET_EVAL_CLASS is None:
+        raise ValueError("TARGET_EVAL_CLASS must be specified to perform prediction-based category ranking.")
+
     print("="*50)
-    print("Starting Top-K Ground Truth Evaluation")
+    print("Starting Prediction-Based Top-K Evaluation")
     print(f"Prediction Mode: {DISTANCE_METRIC.upper()}")
-    print(f"Target Class to Track: {TARGET_EVAL_CLASS if TARGET_EVAL_CLASS else 'ALL CLASSES'}")
+    print(f"Target Class to Track: {TARGET_EVAL_CLASS}")
     print("="*50)
 
     # 1. Load Scaler and Label Encoder
@@ -131,6 +134,13 @@ def main():
     scaler = load(scaler_file)
     le = load(le_file)
     num_classes = len(le.classes_)
+
+    # Ensure TARGET_EVAL_CLASS is in the label encoder
+    if TARGET_EVAL_CLASS not in le.classes_:
+        print(f"Error: '{TARGET_EVAL_CLASS}' not found in loaded Label Encoder classes.")
+        return
+
+    target_class_idx = le.transform([TARGET_EVAL_CLASS])[0]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -178,7 +188,7 @@ def main():
     with torch.no_grad():
         logits, hidden_feats = model(X_val_tensor)
         
-        if DISTANCE_METRIC in['l2', 'cosine']:
+        if DISTANCE_METRIC in ['l2', 'cosine']:
             scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
         elif DISTANCE_METRIC == 'logits':
             scores = logits
@@ -188,31 +198,35 @@ def main():
         _, top3_preds = torch.topk(scores, 3, dim=1)
         top3_preds = top3_preds.cpu().numpy()
 
-    # 6. Categorize into Mutually Exclusive Lists
-    top1_list =[]
+    # 6. Categorize into Mutually Exclusive Lists based on PREDICTED rank of the target class
+    top1_list = []
     top2_list = []
-    top3_list = []
+    top3_list =[]
     not_in_top3_list =[]
 
+    # Track how many objects inside those categories are actually true target objects
+    top1_real_count = 0
+    top2_real_count = 0
+    top3_real_count = 0
+    not_in_top3_real_count = 0
+
     for i in range(len(y_val_encoded)):
-        true_cls_idx = y_val_encoded[i]
         filename = val_filenames[i]
-        true_class_name = le.inverse_transform([true_cls_idx])[0]
+        is_real = (y_val_encoded[i] == target_class_idx)
 
-        # Filter by Target Class if specified (e.g., 'Trailer')
-        if TARGET_EVAL_CLASS is not None and true_class_name != TARGET_EVAL_CLASS:
-            continue
-
-        # Check where the true class sits in the predicted rankings
-        # Logic naturally makes them mutually exclusive (elif)
-        if true_cls_idx == top3_preds[i, 0]:
+        # Check where the TARGET_EVAL_CLASS sits in the predicted rankings for this sample
+        if target_class_idx == top3_preds[i, 0]:
             top1_list.append(filename)
-        elif true_cls_idx == top3_preds[i, 1]:
+            if is_real: top1_real_count += 1
+        elif target_class_idx == top3_preds[i, 1]:
             top2_list.append(filename)
-        elif true_cls_idx == top3_preds[i, 2]:
+            if is_real: top2_real_count += 1
+        elif target_class_idx == top3_preds[i, 2]:
             top3_list.append(filename)
+            if is_real: top3_real_count += 1
         else:
             not_in_top3_list.append(filename)
+            if is_real: not_in_top3_real_count += 1
 
     # 7. Write to Output TXT Files
     def write_list_to_file(file_name, data_list):
@@ -221,7 +235,7 @@ def main():
             for item in data_list:
                 f.write(f"{item}\n")
 
-    prefix = f"{TARGET_EVAL_CLASS}_" if TARGET_EVAL_CLASS else "ALL_CLASSES_"
+    prefix = f"{TARGET_EVAL_CLASS}_"
     
     write_list_to_file(f"{prefix}TOP1_List.txt", top1_list)
     write_list_to_file(f"{prefix}TOP2_List.txt", top2_list)
@@ -229,31 +243,33 @@ def main():
 
     # 8. Generate Statistics File
     stats_path = os.path.join(OUTPUT_DIR, f"{prefix}Statistics.txt")
-    total_tracked = len(top1_list) + len(top2_list) + len(top3_list) + len(not_in_top3_list)
+    total_samples = len(y_val_encoded)
     
     with open(stats_path, 'w') as f:
         f.write("="*40 + "\n")
-        f.write(f"TOP-K EVALUATION STATISTICS\n")
-        f.write(f"Target Class: {TARGET_EVAL_CLASS if TARGET_EVAL_CLASS else 'ALL CLASSES'}\n")
+        f.write(f"PREDICTION-BASED TOP-K STATISTICS\n")
+        f.write(f"Target Class Evaluated: {TARGET_EVAL_CLASS}\n")
         f.write(f"Prediction Mode: {DISTANCE_METRIC.upper()}\n")
         f.write("="*40 + "\n\n")
-        f.write(f"Total Ground Truth Samples Evaluated: {total_tracked}\n\n")
-        f.write(f"Samples ranked as TOP-1: {len(top1_list)}\n")
-        f.write(f"Samples ranked as TOP-2: {len(top2_list)}\n")
-        f.write(f"Samples ranked as TOP-3: {len(top3_list)}\n")
-        f.write(f"Samples NOT in Top-3 : {len(not_in_top3_list)}\n\n")
-        
-        f.write("-" * 40 + "\n")
-        if total_tracked > 0:
-            f.write(f"Top-1 Accuracy for {TARGET_EVAL_CLASS}: {(len(top1_list) / total_tracked) * 100:.2f}%\n")
-            f.write(f"Top-2 Accuracy for {TARGET_EVAL_CLASS}: {((len(top1_list) + len(top2_list)) / total_tracked) * 100:.2f}%\n")
-            f.write(f"Top-3 Accuracy for {TARGET_EVAL_CLASS}: {((len(top1_list) + len(top2_list) + len(top3_list)) / total_tracked) * 100:.2f}%\n")
+        f.write(f"Total Validation Samples Evaluated: {total_samples}\n\n")
+
+        def write_category_stats(cat_name, total_count, real_count):
+            acc = (real_count / total_count * 100) if total_count > 0 else 0.0
+            f.write(f"--- {cat_name} ---\n")
+            f.write(f"Total objects scored into this category: {total_count}\n")
+            f.write(f"Objects actually belonging to ground truth '{TARGET_EVAL_CLASS}': {real_count}\n")
+            f.write(f"Accuracy (Real / Total) within category: {acc:.2f}%\n\n")
+
+        write_category_stats("TOP-1 Category", len(top1_list), top1_real_count)
+        write_category_stats("TOP-2 Category", len(top2_list), top2_real_count)
+        write_category_stats("TOP-3 Category", len(top3_list), top3_real_count)
+        write_category_stats("Not in TOP-3 Category", len(not_in_top3_list), not_in_top3_real_count)
 
     print(f"\nEvaluation Complete! Results saved to '{OUTPUT_DIR}'")
-    print(f"TOP-1 Hits: {len(top1_list)}")
-    print(f"TOP-2 Hits: {len(top2_list)}")
-    print(f"TOP-3 Hits: {len(top3_list)}")
-    print(f"Not in TOP-3: {len(not_in_top3_list)}")
+    print(f"Categorized into TOP-1: {len(top1_list)} (Actually real: {top1_real_count})")
+    print(f"Categorized into TOP-2: {len(top2_list)} (Actually real: {top2_real_count})")
+    print(f"Categorized into TOP-3: {len(top3_list)} (Actually real: {top3_real_count})")
+    print(f"Not in TOP-3: {len(not_in_top3_list)} (Actually real: {not_in_top3_real_count})")
 
 if __name__ == "__main__":
     main()
