@@ -72,7 +72,7 @@ ALL_CLASSES = [
 'TruckTractor'
 ]
 
-TARGET_NOVEL_CLASS = 'Forklifts'
+TARGET_NOVEL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 
 Dataset_Name = 'Lavyanut'
 
