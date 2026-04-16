@@ -65,8 +65,8 @@ class SatelliteCropDataset(Dataset):
 # 3. Main Processing Function
 # -------------------------------------------------------------------------
 def main():
-    input_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Filtered_Dataset/Image_Obj_Crops/train/'
-    output_dir = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Filtered_Dataset/Image_Obj_Embs/train/'
+    input_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops/'
+    output_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/'
     checkpoint_path = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/models/dinov3_vitl16_pretrain_sat493m-eadcf0ff.pth'
 
     # Hyperparameters for speed
