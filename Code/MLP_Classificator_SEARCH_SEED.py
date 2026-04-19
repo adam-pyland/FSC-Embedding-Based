@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import glob
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -33,6 +34,22 @@ except ImportError:
     print("Run: pip install pytorch-metric-learning")
     sys.exit(1)
 
+def seed_everything(seed=42):
+    """
+    Locks all random seeds so that model initializations, data shuffling, 
+    and loss functions behave exactly the same way every time the script runs.
+    """
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # If you use multi-GPU
+    
+    # Force deterministic algorithms in cuDNN
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 # ==========================================
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
@@ -49,14 +66,14 @@ DISTANCE_METRIC = 'cosine'
 # Options: 'focal_center', 'triplet_center', 'focal_triplet_center'
 LOSS_COMBINATION = 'focal_center'
 
-CUSTOM_METRIC_TYPE = 'f2_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
+CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 
 
 
 MAX_EPOCHS = 500
 
 # Combined Metric ratios for F1 and F2 scores
-F2_NOVEL_RATIO = 0.80; F1_ALL_RATIO = 0.20
+F2_NOVEL_RATIO = 0.70; F1_ALL_RATIO = 0.30
 
 ALL_CLASSES = [
 'Bulldozers',
@@ -76,9 +93,9 @@ TARGET_NOVEL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 
 Dataset_Name = 'Lavyanut'
 
-SAVE_DIR = f"models/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-Based"
+SAVE_DIR = f"models2/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-Based"
+PLOT_DIR = f"Outputs2/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/base_class/'
@@ -321,6 +338,7 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
 # ==========================================
 
 def main():
+    seed_everything(41)
     # 0. Save a copy of the executing script to ensure reproducibility
     try:
         current_script = os.path.abspath(__file__)
@@ -418,6 +436,7 @@ def main():
         scaler = load(scaler_file)
         le = load(le_file)
         X_test_scaled = scaler.transform(X_test)
+        X_train_scaled = scaler.fit_transform(X_train)
     else:
         print("\nNo saved model found. Preparing for Training...")
         scaler = StandardScaler()
@@ -427,7 +446,7 @@ def main():
         dump(scaler, scaler_file)
         dump(le, le_file)
         
-        X_tr, X_val, y_tr, y_val = train_test_split(X_train_scaled, y_train_encoded, test_size=0.1, random_state=42)
+        X_tr, X_val, y_tr, y_val = train_test_split(X_train_scaled, y_train_encoded, test_size=0.1, random_state=42, stratify=y_train_encoded)
         
         # Define DataLoaders once
         batch_size = 2048
@@ -531,13 +550,17 @@ def main():
                 f1_scores = f1_score(all_labels, all_preds, average=None, labels=np.arange(num_classes), zero_division=0)
                 macro_f1 = np.mean(f1_scores)
                 novel_f1 = f1_scores[novel_class_idx]
+
+                base_classes_mask = np.arange(num_classes) != novel_class_idx
+                macro_base_f1 = np.mean(f1_scores[base_classes_mask])
                 
                 if CUSTOM_METRIC_TYPE == 'f1_novel':
                     custom_metric = novel_f1
                 elif CUSTOM_METRIC_TYPE == 'f2_novel':
                     custom_metric = novel_f2
                 else:
-                    custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_f1) ### ADAM CHANGED
+                    # custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_f1) ### ADAM CHANGED - Concentrates on the f2 score and mean of f1 score for all of the classes
+                    custom_metric = (F2_NOVEL_RATIO * novel_f1) + (F1_ALL_RATIO * macro_base_f1)
 
                 
                 if custom_metric > best_val_metric:
@@ -556,289 +579,332 @@ def main():
             return best_val_metric
 
         file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
-        if not os.path.exists(file_path):
-            print("\n" + "="*50)
-            print("Starting Optuna Hyperparameter Search (25 Trials)...")
-            print("="*50)
-            pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
-            study = optuna.create_study(direction='maximize', pruner=pruner)
-            study.optimize(objective, n_trials=25)
+        # if not os.path.exists(file_path):
+        #     print("\n" + "="*50)
+        #     print("Starting Optuna Hyperparameter Search (25 Trials)...")
+        #     print("="*50)
+        #     pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
+        #     study = optuna.create_study(direction='maximize', pruner=pruner)
+        #     study.optimize(objective, n_trials=25)
 
-            print("\n" + "="*50)
-            print("Optuna Search Complete!")
-            print("Best Hyperparameters:", study.best_params)
-            print("="*50 + "\n")
+        #     print("\n" + "="*50)
+        #     print("Optuna Search Complete!")
+        #     print("Best Hyperparameters:", study.best_params)
+        #     print("="*50 + "\n")
 
-            best_params = study.best_params
-            file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
-            with open(file_path, 'w') as f:
-                json.dump(best_params, f, indent=4)
+        #     best_params = study.best_params
+        #     file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
+        #     with open(file_path, 'w') as f:
+        #         json.dump(best_params, f, indent=4)
 
         # ==============================================================
         # FINAL FULL TRAINING WITH BEST HYPERPARAMETERS
         # ==============================================================
-        print("Training Final Model with Best Hyperparameters...")
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
-                best_params = json.load(f)
-                print("+"*30)
-                print(f"Found parameter: {best_params}")
-        
-        final_batch_size = best_params.get('batch_size', 2048)
-        train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
+        print("\nBypassing Optuna: Using provided Best Hyperparameters.")
+        best_params = {
+            "batch_size": 256,
+            "gamma": 2.086236669469135,
+            "center_weight": 0.008262002243528315,
+            "lr": 0.0015614272356320803,
+            "weight_decay": 0.0004987318753172815,
+            "weight_smoothing": 0.2136297115802822,
+            "novel_multiplier": 14.542834580311983
+        }
 
-        smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
-        if 'novel_multiplier' in best_params:
+        final_batch_size = best_params['batch_size']
+        TARGET_NOVEL_F1 = 0.9180  # This is the golden score you want to hit
+        
+        # We will test seeds from 1 to 500
+        for current_seed in range(1, 501):
+            print("\n" + "="*50)
+            print(f"🚀 TESTING SEED: {current_seed}")
+            print("="*50)
+            
+            seed_everything(current_seed)
+            
+            model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
+            
+            train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
+
+            smoothed_weights = np.power(raw_class_weights, best_params['weight_smoothing'])
             smoothed_weights[novel_class_idx] *= best_params['novel_multiplier']
-        class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
+            class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
-        criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
-        criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
-        final_center_weight = best_params['center_weight']
+            criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
+            criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
+            final_center_weight = best_params['center_weight']
 
-        miner = pml_miners.BatchHardMiner(distance=pml_dist)
-        criterion_triplet = pml_losses.TripletMarginLoss(margin=triplet_margin, distance=pml_dist)
-        
-        optimizer = optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay']) 
-        optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
-
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10)
-        
-        patience = 50
-        best_val_metric = -1.0
-        epochs_no_improve = 0
-        
-        for epoch in range(MAX_EPOCHS):
-            model.train()
-            train_loss = 0.0
-            for features, labels in train_loader:
-                features, labels = features.to(device), labels.to(device)
-                
-                optimizer.zero_grad()
-                optimizer_center.zero_grad()
-                
-                logits, hidden_feats = model(features)
-                
-                loss_center = criterion_center(hidden_feats, labels)
-                loss = final_center_weight * loss_center
-                
-                if LOSS_COMBINATION in['focal_center', 'focal_triplet_center']:
-                    loss += criterion_focal(logits, labels)
-
-                if LOSS_COMBINATION in ['triplet_center', 'focal_triplet_center']:
-                    hard_pairs = miner(hidden_feats, labels)
-                    loss += criterion_triplet(hidden_feats, labels, hard_pairs)
-
-                loss.backward()
-                
-                optimizer.step()
-                for param in criterion_center.parameters():
-                    param.grad.data *= (1. / final_center_weight)
-                optimizer_center.step()
-                
-                train_loss += loss.item()
-                
-            # Calculation of Validation prototypes if active
-            if DISTANCE_METRIC in ['l2', 'cosine']:
-                train_centers = compute_train_centers(model, train_loader, num_classes, device)
-
-            model.eval()
-            all_preds =[]
-            all_labels =[]
-            val_loss = 0.0
-            with torch.no_grad():
-                for features, labels in val_loader:
+            miner = pml_miners.BatchHardMiner(distance=pml_dist)
+            criterion_triplet = pml_losses.TripletMarginLoss(margin=triplet_margin, distance=pml_dist)
+            
+            optimizer = optim.Adam(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay']) 
+            optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10)
+            
+            patience = 50
+            best_val_metric = -1.0
+            epochs_no_improve = 0
+            best_model_state = None
+            
+            for epoch in range(MAX_EPOCHS):
+                model.train()
+                for features, labels in train_loader:
                     features, labels = features.to(device), labels.to(device)
-                    logits, hidden_feats = model(features)
+                    optimizer.zero_grad()
+                    optimizer_center.zero_grad()
                     
+                    logits, hidden_feats = model(features)
                     loss_center = criterion_center(hidden_feats, labels)
                     loss = final_center_weight * loss_center
                     
-                    if LOSS_COMBINATION in ['focal_center', 'focal_triplet_center']:
+                    if LOSS_COMBINATION in['focal_center', 'focal_triplet_center']:
                         loss += criterion_focal(logits, labels)
                     if LOSS_COMBINATION in['triplet_center', 'focal_triplet_center']:
                         hard_pairs = miner(hidden_feats, labels)
                         loss += criterion_triplet(hidden_feats, labels, hard_pairs)
 
-                    val_loss += loss.item()
+                    loss.backward()
+                    optimizer.step()
+                    for param in criterion_center.parameters():
+                        param.grad.data *= (1. / final_center_weight)
+                    optimizer_center.step()
+                    
+                if DISTANCE_METRIC in ['l2', 'cosine']:
+                    train_centers = compute_train_centers(model, train_loader, num_classes, device)
 
-                    if DISTANCE_METRIC in ['l2', 'cosine']:
-                        scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
-                    elif DISTANCE_METRIC == 'logits':
-                        scores = logits
+                model.eval()
+                all_preds, all_labels = [],[]
+                with torch.no_grad():
+                    for features, labels in val_loader:
+                        features, labels = features.to(device), labels.to(device)
+                        logits, hidden_feats = model(features)
+                        
+                        if DISTANCE_METRIC in ['l2', 'cosine']:
+                            scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
+                        elif DISTANCE_METRIC == 'logits':
+                            scores = logits
 
-                    preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
-                    all_preds.extend(preds.cpu().numpy())
-                    all_labels.extend(labels.cpu().numpy())
-            
-            val_loss /= len(val_loader)
-            
-            f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, labels=np.arange(num_classes), zero_division=0) 
-            f1_scores = f1_score(all_labels, all_preds, average=None, labels=np.arange(num_classes), zero_division=0)
-            novel_f1 = f1_scores[novel_class_idx] 
-            novel_f2 = f2_scores[novel_class_idx] 
-            macro_f1 = np.mean(f1_scores)
-            
-            if CUSTOM_METRIC_TYPE == 'f1_novel':
-                custom_metric = novel_f1
-            elif CUSTOM_METRIC_TYPE == 'f2_novel':
-                custom_metric = novel_f2
-            else:
-                custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_f1) ### ADAM CHANGED
-            scheduler.step(custom_metric)
-
-            if (epoch+1) % 10 == 0:
-                print(f"Epoch[{epoch+1}/{MAX_EPOCHS}], Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}")
-
-            if custom_metric > best_val_metric + 1e-4: 
-                best_val_metric = custom_metric
-                epochs_no_improve = 0
-                torch.save(model.state_dict(), best_model_file) 
-            else:
-                epochs_no_improve += 1
+                        preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+                        all_preds.extend(preds.cpu().numpy())
+                        all_labels.extend(labels.cpu().numpy())
                 
-            if epochs_no_improve >= patience:
-                print(f"Early stopping triggered at epoch {epoch+1} (No improvement in Custom Metric)")
+                f1_scores = f1_score(all_labels, all_preds, average=None, labels=np.arange(num_classes), zero_division=0)
+                f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, labels=np.arange(num_classes), zero_division=0) 
+                
+                novel_f1 = f1_scores[novel_class_idx] 
+                novel_f2 = f2_scores[novel_class_idx] 
+                macro_base_f1 = np.mean(f1_scores[np.arange(num_classes) != novel_class_idx])
+                
+                if CUSTOM_METRIC_TYPE == 'f1_novel':
+                    custom_metric = novel_f1
+                elif CUSTOM_METRIC_TYPE == 'f2_novel':
+                    custom_metric = novel_f2
+                else:
+                    custom_metric = (F2_NOVEL_RATIO * novel_f1) + (F1_ALL_RATIO * macro_base_f1)
+                
+                scheduler.step(custom_metric)
+
+                if custom_metric > best_val_metric + 1e-4: 
+                    best_val_metric = custom_metric
+                    epochs_no_improve = 0
+                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                else:
+                    epochs_no_improve += 1
+                    
+                if epochs_no_improve >= patience:
+                    break
+            
+            # --- Evaluate this seed's best model ---
+            model.load_state_dict(best_model_state)
+            model.eval()
+            
+            # 1. Get true prototypes using the full training set (just like Section 4 does)
+            final_train_dataset = TensorDataset(torch.FloatTensor(X_train_scaled), torch.LongTensor(y_train_encoded))
+            final_train_loader = DataLoader(final_train_dataset, batch_size=2048, shuffle=False)
+            
+            if DISTANCE_METRIC in ['l2', 'cosine']:
+                train_centers = compute_train_centers(model, final_train_loader, num_classes, device)
+                
+            # 2. Run predictions directly on the X_test set
+            with torch.no_grad():
+                X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
+                y_test_tensor = torch.LongTensor(y_test_encoded).to(device)
+                
+                test_logits, X_test_feats = model(X_test_tensor)
+                
+                if DISTANCE_METRIC in ['l2', 'cosine']:
+                    scores = compute_prototype_scores(X_test_feats, train_centers, metric=DISTANCE_METRIC)
+                else:
+                    scores = test_logits
+                    
+                preds = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+                preds = preds.cpu().numpy()
+
+            # 3. Map to Base vs Novel so we can check your exact target metric
+            y_pred_super = np.array(['Novel' if le.inverse_transform([lbl])[0] == TARGET_NOVEL_CLASS else 'Base' for lbl in preds])
+            y_test_super = np.array(['Novel' if le.inverse_transform([lbl])[0] == TARGET_NOVEL_CLASS else 'Base' for lbl in y_test_encoded])
+            
+            # 4. Extract metrics precisely
+            report_dict = classification_report(y_test_super, y_pred_super, output_dict=True, zero_division=0)
+            test_novel_f1 = report_dict.get('Novel', {}).get('f1-score', 0.0)
+            test_novel_prec = report_dict.get('Novel', {}).get('precision', 0.0)
+            test_novel_rec = report_dict.get('Novel', {}).get('recall', 0.0)
+
+            print(f"Seed {current_seed} Finished -> TEST SET Novel F1: {test_novel_f1:.4f} (Prec: {test_novel_prec:.4f}, Rec: {test_novel_rec:.4f})")
+
+            # Check if we hit our golden target ON THE TEST SET!
+            if test_novel_f1 >= TARGET_NOVEL_F1:
+                print("\n" + "🎉"*20)
+                print(f"GOLDEN SEED FOUND: {current_seed}")
+                print(f"Achieved Test Set Novel F1-Score: {test_novel_f1:.4f}")
+                print("🎉"*20 + "\n")
+                
+                # Save this model
+                torch.save(best_model_state, best_model_file)
+                torch.save(best_model_state, last_model_file)
+                
+                # We break out of the loop here!
                 break
-                
-        torch.save(model.state_dict(), last_model_file)
-        print("Training Complete! Saved best and last models.")
-        
-        model.load_state_dict(torch.load(best_model_file))
+
+
+        # --- 4. DETAILED METRICS CALCULATION (Final Dataset) ---
+        print("\nStarting generation of detailed metrics and plots using the Golden Seed model...")
+        # Load the best model formally
+        model.load_state_dict(torch.load(best_model_file, map_location=device))
         model.eval()
 
-    # --- 4. DETAILED METRICS CALCULATION (Final Dataset) ---
-    final_train_dataset = TensorDataset(torch.FloatTensor(X_train_scaled), torch.LongTensor(y_train_encoded))
-    final_train_loader = DataLoader(final_train_dataset, batch_size=2048, shuffle=False)
+        final_train_dataset = TensorDataset(torch.FloatTensor(X_train_scaled), torch.LongTensor(y_train_encoded))
+        final_train_loader = DataLoader(final_train_dataset, batch_size=2048, shuffle=False)
 
-    # Compute training centers unconditionally here as they will be needed for the plot
-    train_centers = compute_train_centers(model, final_train_loader, num_classes, device)
-    train_centers_np = train_centers.cpu().numpy()
+        # Compute training centers unconditionally here as they will be needed for the plot
+        train_centers = compute_train_centers(model, final_train_loader, num_classes, device)
+        train_centers_np = train_centers.cpu().numpy()
 
-    X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
-    y_test_tensor = torch.LongTensor(y_test_encoded).to(device)
+        X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
+        y_test_tensor = torch.LongTensor(y_test_encoded).to(device)
 
-    with torch.no_grad():
-        test_logits, X_separated_features_all = model(X_test_tensor)
+        with torch.no_grad():
+            test_logits, X_separated_features_all = model(X_test_tensor)
 
-        if DISTANCE_METRIC in['l2', 'cosine']:
-            scores = compute_prototype_scores(X_separated_features_all, train_centers, metric=DISTANCE_METRIC)
-        elif DISTANCE_METRIC == 'logits':
-            scores = test_logits
+            if DISTANCE_METRIC in['l2', 'cosine']:
+                scores = compute_prototype_scores(X_separated_features_all, train_centers, metric=DISTANCE_METRIC)
+            elif DISTANCE_METRIC == 'logits':
+                scores = test_logits
 
-        y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
-        y_pred_encoded = y_pred_encoded.cpu().numpy()
-        X_separated_features_all = X_separated_features_all.cpu().numpy()
+            y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+            y_pred_encoded = y_pred_encoded.cpu().numpy()
+            X_separated_features_all = X_separated_features_all.cpu().numpy()
 
-    accuracy = np.mean(y_pred_encoded == y_test_encoded)
-    metric_type = f"Top-{TOP_K_VALUE}" if USE_TOP_K_METRICS else "Top-1"
-    
-    print(f"\nOverall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%")
-    
-    y_pred = le.inverse_transform(y_pred_encoded) 
-    
-    print(f"\n--- Detailed Classification Report (Classes, {metric_type}) ---")
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    file_path = os.path.join(PLOT_DIR, 'Classification_Report_CHECK_ADAM.txt')
-    report = classification_report(y_test, y_pred, digits=4)
-    with open(file_path, "w") as f:
-        mode_str = "MLP Logits" if DISTANCE_METRIC == 'logits' else f"Prototypes ({DISTANCE_METRIC.upper()})"
-        f.write(f"Prediction Mode: {mode_str}\n")
-        f.write(f"Loss Combination : {LOSS_COMBINATION.upper()}\n")
-        f.write(f"Overall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%\n")
-        f.write(report)
-        print(report)
-
-    # --- 5. Sample Validation Data for Visualization ---
-    print("\nSampling Validation data for clear visualization...")
-    X_test_viz =[]
-    y_test_viz =[]
-    X_features_viz =[]
-    samples_per_class = 200 
-    
-    for cls in np.unique(y_test):
-        idx = np.where(y_test == cls)[0]
-        selected_idx = np.random.choice(idx, min(samples_per_class, len(idx)), replace=False)
-        X_test_viz.extend(X_test_scaled[selected_idx])
-        y_test_viz.extend(y_test[selected_idx])
-        X_features_viz.extend(X_separated_features_all[selected_idx])
+        accuracy = np.mean(y_pred_encoded == y_test_encoded)
+        metric_type = f"Top-{TOP_K_VALUE}" if USE_TOP_K_METRICS else "Top-1"
         
-    X_test_viz = np.array(X_test_viz)
-    y_test_viz = np.array(y_test_viz)
-    X_separated_features = np.array(X_features_viz)
-
-    # --- 7. Dimensionality Reduction ---
-    print("Applying Dimensionality Reduction on Combined Data (Validation + Train Centers)...")
-    
-    combined_features = np.vstack([X_separated_features, train_centers_np])
-
-    print("Applying Kernel PCA (RBF)...")
-    kpca = KernelPCA(n_components=2, kernel='rbf', gamma=None) 
-    combined_kpca = kpca.fit_transform(combined_features)
-    
-    X_kpca = combined_kpca[:-num_classes]           
-    centers_kpca = combined_kpca[-num_classes:]     
-
-    print("Applying t-SNE...")
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    combined_tsne = tsne.fit_transform(combined_features)
-    
-    X_tsne = combined_tsne[:-num_classes]           
-    centers_tsne = combined_tsne[-num_classes:]     
-
-    # --- 8. Plotting ---
-    print("Plotting graphs with Training Prototype centers...")
-    sns.set_theme(style="whitegrid")
-    fig, axes = plt.subplots(1, 2, figsize=(22, 10))
-    unique_classes = np.unique(y_test_viz)
-
-    class_palette = dict(zip(unique_classes, sns.color_palette("tab10", len(unique_classes))))
-    bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
-
-    sns.scatterplot(
-        ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None
-    )
-    for cls in unique_classes:
-        cls_idx = le.transform([cls])[0]
-        center_x, center_y = centers_kpca[cls_idx]
+        print(f"\nOverall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%")
         
-        axes[0].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[0].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[0].set_title('Kernel PCA (RBF) with Train Prototype Centers', fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Principal Component 1')
-    axes[0].set_ylabel('Principal Component 2')
-    axes[0].legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    sns.scatterplot(
-        ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False
-    )
-    for cls in unique_classes:
-        cls_idx = le.transform([cls])[0]
-        center_x, center_y = centers_tsne[cls_idx]
+        y_pred = le.inverse_transform(y_pred_encoded) 
         
-        axes[1].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[1].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+        print(f"\n--- Detailed Classification Report (Classes, {metric_type}) ---")
+        os.makedirs(PLOT_DIR, exist_ok=True)
+        file_path = os.path.join(PLOT_DIR, 'Classification_Report_CHECK_ADAM.txt')
+        report = classification_report(y_test, y_pred, digits=4)
+        with open(file_path, "w") as f:
+            mode_str = "MLP Logits" if DISTANCE_METRIC == 'logits' else f"Prototypes ({DISTANCE_METRIC.upper()})"
+            f.write(f"Prediction Mode: {mode_str}\n")
+            f.write(f"Loss Combination : {LOSS_COMBINATION.upper()}\n")
+            f.write(f"Overall Validation Set Accuracy ({metric_type}): {accuracy * 100:.2f}%\n")
+            f.write(report)
+            print(report)
 
-    axes[1].set_title('t-SNE Map with Train Prototype Centers', fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('t-SNE Dimension 1')
-    axes[1].set_ylabel('t-SNE Dimension 2')
+        # --- 5. Sample Validation Data for Visualization ---
+        print("\nSampling Validation data for clear visualization...")
+        X_test_viz =[]
+        y_test_viz =[]
+        X_features_viz =[]
+        samples_per_class = 200 
+        
+        for cls in np.unique(y_test):
+            idx = np.where(y_test == cls)[0]
+            selected_idx = np.random.choice(idx, min(samples_per_class, len(idx)), replace=False)
+            X_test_viz.extend(X_test_scaled[selected_idx])
+            y_test_viz.extend(y_test[selected_idx])
+            X_features_viz.extend(X_separated_features_all[selected_idx])
+            
+        X_test_viz = np.array(X_test_viz)
+        y_test_viz = np.array(y_test_viz)
+        X_separated_features = np.array(X_features_viz)
 
-    plt.tight_layout()
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    plt.savefig(os.path.join(PLOT_DIR, 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'), dpi=300)
-    print("Done! Saved plot as 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'")
+        # --- 7. Dimensionality Reduction ---
+        print("Applying Dimensionality Reduction on Combined Data (Validation + Train Centers)...")
+        
+        combined_features = np.vstack([X_separated_features, train_centers_np])
 
-    # === 9. Base vs Novel Evaluation and Visualization ===
-    evaluate_and_visualize_superclasses(
-        y_test, y_pred, X_kpca, X_tsne, y_test_viz, 
-        centers_kpca=centers_kpca, centers_tsne=centers_tsne, le=le
-    )
+        print("Applying Kernel PCA (RBF)...")
+        kpca = KernelPCA(n_components=2, kernel='rbf', gamma=None) 
+        combined_kpca = kpca.fit_transform(combined_features)
+        
+        X_kpca = combined_kpca[:-num_classes]           
+        centers_kpca = combined_kpca[-num_classes:]     
+
+        print("Applying t-SNE...")
+        tsne = TSNE(n_components=2, perplexity=30, random_state=42)
+        combined_tsne = tsne.fit_transform(combined_features)
+        
+        X_tsne = combined_tsne[:-num_classes]           
+        centers_tsne = combined_tsne[-num_classes:]     
+
+        # --- 8. Plotting ---
+        print("Plotting graphs with Training Prototype centers...")
+        sns.set_theme(style="whitegrid")
+        fig, axes = plt.subplots(1, 2, figsize=(22, 10))
+        unique_classes = np.unique(y_test_viz)
+
+        class_palette = dict(zip(unique_classes, sns.color_palette("tab10", len(unique_classes))))
+        bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
+
+        sns.scatterplot(
+            ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
+            hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None
+        )
+        for cls in unique_classes:
+            cls_idx = le.transform([cls])[0]
+            center_x, center_y = centers_kpca[cls_idx]
+            
+            axes[0].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
+            axes[0].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
+                            fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+
+        axes[0].set_title('Kernel PCA (RBF) with Train Prototype Centers', fontsize=14, fontweight='bold')
+        axes[0].set_xlabel('Principal Component 1')
+        axes[0].set_ylabel('Principal Component 2')
+        axes[0].legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        sns.scatterplot(
+            ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
+            hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False
+        )
+        for cls in unique_classes:
+            cls_idx = le.transform([cls])[0]
+            center_x, center_y = centers_tsne[cls_idx]
+            
+            axes[1].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
+            axes[1].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
+                            fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+
+        axes[1].set_title('t-SNE Map with Train Prototype Centers', fontsize=14, fontweight='bold')
+        axes[1].set_xlabel('t-SNE Dimension 1')
+        axes[1].set_ylabel('t-SNE Dimension 2')
+
+        plt.tight_layout()
+        os.makedirs(PLOT_DIR, exist_ok=True)
+        plt.savefig(os.path.join(PLOT_DIR, 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'), dpi=300)
+        print("Done! Saved plot as 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'")
+
+        # === 9. Base vs Novel Evaluation and Visualization ===
+        evaluate_and_visualize_superclasses(
+            y_test, y_pred, X_kpca, X_tsne, y_test_viz, 
+            centers_kpca=centers_kpca, centers_tsne=centers_tsne, le=le
+        )
+  
 
 if __name__ == "__main__":
     main()

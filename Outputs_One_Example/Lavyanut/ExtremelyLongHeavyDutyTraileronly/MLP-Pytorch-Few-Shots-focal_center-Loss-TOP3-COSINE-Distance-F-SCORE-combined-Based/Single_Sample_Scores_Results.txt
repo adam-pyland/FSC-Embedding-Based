@@ -1,0 +1,18 @@
+============================================================
+SINGLE SAMPLE CLASSIFICATION SCORES (SORTED)
+Target Label: ExtremelyLongHeavyDutyTraileronly
+Metric Used:  COSINE
+============================================================
+
+Rank  | Class Name                          | Score     
+------------------------------------------------------------
+1     | MediumStandard                      | 0.7483     
+2     | ExtremelyLongHeavyDutyTraileronly   | 0.7161      <--- [ACTUAL CLASS]
+3     | Other                               | 0.6878     
+4     | HeavyDuty                           | 0.6362     
+5     | CementMixerTrucks                   | 0.5652     
+6     | LongHeavyDuty                       | 0.4849     
+7     | Bulldozers                          | 0.4749     
+8     | TruckTractor                        | 0.4231     
+9     | MediumSmall                         | 0.4134     
+10    | Small                               | 0.2060     

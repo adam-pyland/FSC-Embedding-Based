@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import glob
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -32,6 +33,22 @@ except ImportError:
     print("Error: Please install pytorch-metric-learning to use Triplet Loss functionalities.")
     print("Run: pip install pytorch-metric-learning")
     sys.exit(1)
+
+def seed_everything(seed=42):
+    """
+    Locks all random seeds so that model initializations, data shuffling, 
+    and loss functions behave exactly the same way every time the script runs.
+    """
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # If you use multi-GPU
+    
+    # Force deterministic algorithms in cuDNN
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # ==========================================
 # Global Configuration & Top-K / Distance Flags
@@ -321,6 +338,7 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
 # ==========================================
 
 def main():
+    seed_everything(8)
     # 0. Save a copy of the executing script to ensure reproducibility
     try:
         current_script = os.path.abspath(__file__)
@@ -418,6 +436,7 @@ def main():
         scaler = load(scaler_file)
         le = load(le_file)
         X_test_scaled = scaler.transform(X_test)
+        X_train_scaled = scaler.fit_transform(X_train)
     else:
         print("\nNo saved model found. Preparing for Training...")
         scaler = StandardScaler()

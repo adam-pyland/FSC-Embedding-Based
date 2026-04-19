@@ -18,10 +18,11 @@ import optuna
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.decomposition import KernelPCA
-from sklearn.manifold import TSNE
+from sklearn.manifold import TSNE, MDS
 from sklearn.metrics import classification_report, f1_score, fbeta_score
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
+
 import json
 
 # === NEW: PyTorch Metric Learning for Triplet Loss ===
@@ -95,16 +96,16 @@ Dataset_Name = 'Lavyanut'
 
 SAVE_DIR = f"models/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_One_Example/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/base_class/'
-VAL_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/base_class/'
+VAL_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/base_class_Zero_Elements/'
 
 if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
     TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/trailer_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer/'
+    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer_One/'
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/forklifts_few_shots/'
@@ -773,95 +774,189 @@ def main():
         f.write(report)
         print(report)
 
-    # --- 5. Sample Validation Data for Visualization ---
-    print("\nSampling Validation data for clear visualization...")
-    X_test_viz =[]
-    y_test_viz =[]
-    X_features_viz =[]
-    samples_per_class = 200 
+    # --- 5. Sample ONLY the Single Novel Sample for Visualization ---
+    print(f"\nIsolating the single novel sample for visualization...")
     
-    for cls in np.unique(y_test):
-        idx = np.where(y_test == cls)[0]
-        selected_idx = np.random.choice(idx, min(samples_per_class, len(idx)), replace=False)
-        X_test_viz.extend(X_test_scaled[selected_idx])
-        y_test_viz.extend(y_test[selected_idx])
-        X_features_viz.extend(X_separated_features_all[selected_idx])
+    # Find the index of the sample that belongs to the novel class
+    # Since you said there is only one in the directory, this will pick that one.
+    novel_idx = np.where(y_test == TARGET_NOVEL_CLASS)[0]
+    
+    if len(novel_idx) == 0:
+        print(f"Error: No samples found for {TARGET_NOVEL_CLASS} in the test set!")
+        return
+
+    # Filter to only include this one sample
+    X_test_viz = X_test_scaled[novel_idx]
+    y_test_viz = y_test[novel_idx]
+    X_separated_features = X_separated_features_all[novel_idx]
+
+    # --- 5b. Calculate and Save SORTED Scores for the Single Sample to TXT ---
+    single_sample_txt = os.path.join(PLOT_DIR, 'Single_Sample_Scores_Results.txt')
+    
+    single_feat_tensor = torch.FloatTensor(X_test_viz).to(device)
+    
+    model.eval()
+    with torch.no_grad():
+        logits, hidden_feats = model(single_feat_tensor)
+        if DISTANCE_METRIC in ['l2', 'cosine']:
+            scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
+        else:
+            scores = logits
         
-    X_test_viz = np.array(X_test_viz)
-    y_test_viz = np.array(y_test_viz)
-    X_separated_features = np.array(X_features_viz)
+        scores_np = scores.cpu().numpy().flatten()
 
-    # --- 7. Dimensionality Reduction ---
-    print("Applying Dimensionality Reduction on Combined Data (Validation + Train Centers)...")
+    # Get class names and scores, then sort them descending
+    class_names = le.classes_
+    # Create a list of (name, score) tuples
+    score_list = list(zip(class_names, scores_np))
+    # Sort by score (the second element of the tuple) in reverse order (highest first)
+    score_list.sort(key=lambda x: x[1], reverse=True)
+
+    # Write results to TXT
+    with open(single_sample_txt, "w") as f:
+        f.write("="*60 + "\n")
+        f.write(f"SINGLE SAMPLE CLASSIFICATION SCORES (SORTED)\n")
+        f.write(f"Target Label: {TARGET_NOVEL_CLASS}\n")
+        f.write(f"Metric Used:  {DISTANCE_METRIC.upper()}\n")
+        f.write("="*60 + "\n\n")
+        
+        f.write(f"{'Rank':<5} | {'Class Name':<35} | {'Score':<10}\n")
+        f.write("-" * 60 + "\n")
+        
+        for rank, (name, score) in enumerate(score_list, 1):
+            marker = " <--- [ACTUAL CLASS]" if name == TARGET_NOVEL_CLASS else ""
+            f.write(f"{rank:<5} | {name:<35} | {score:<10.4f} {marker}\n")
+
+    print(f"Sorted scores saved to: {single_sample_txt}")
+
+    # --- 7. MDS Projection based on Cosine Distance ---
+    print("Calculating MDS Projection (Physical Distance = Cosine Distance)...")
     
-    combined_features = np.vstack([X_separated_features, train_centers_np])
-
-    print("Applying Kernel PCA (RBF)...")
-    kpca = KernelPCA(n_components=2, kernel='rbf', gamma=None) 
-    combined_kpca = kpca.fit_transform(combined_features)
+    # 1. Combine the 1 Sample feature with the 11 Center features (Total 12 points)
+    # hidden_feats is the [1, 256] vector for the sample
+    # train_centers is the [11, 256] matrix for class prototypes
+    combined_vectors = torch.cat([hidden_feats, train_centers], dim=0)
     
-    X_kpca = combined_kpca[:-num_classes]           
-    centers_kpca = combined_kpca[-num_classes:]     
-
-    print("Applying t-SNE...")
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    combined_tsne = tsne.fit_transform(combined_features)
+    # 2. Normalize the vectors to unit length
+    # (Cosine Similarity is just the dot product of normalized vectors)
+    norm_vectors = F.normalize(combined_vectors, p=2, dim=1).cpu().numpy()
     
-    X_tsne = combined_tsne[:-num_classes]           
-    centers_tsne = combined_tsne[-num_classes:]     
+    # 3. Compute the 12x12 Cosine Similarity Matrix
+    # result[i, j] is the similarity between point i and point j
+    sim_matrix = np.dot(norm_vectors, norm_vectors.T)
+    
+    # 4. Convert Similarity to Distance (Distance = 1 - Similarity)
+    # Higher similarity (e.g. 0.9) becomes small distance (0.1)
+    dist_matrix = 1 - sim_matrix
+    # Ensure distance is non-negative due to floating point math
+    dist_matrix = np.maximum(dist_matrix, 0)
 
-    # --- 8. Plotting ---
-    print("Plotting graphs with Training Prototype centers...")
+    # 5. Run MDS
+    # This tries to place the 12 points in 2D so that their Euclidean distance 
+    # matches the 'dist_matrix' as closely as possible.
+    mds = MDS(n_components=2, dissimilarity='precomputed', random_state=42, normalized_stress='auto')
+    coords = mds.fit_transform(dist_matrix)
+    
+    X_mds = coords[0:1]           # The novel sample
+    centers_mds = coords[1:]      # The 11 class centers
+
+    # --- 8. Plotting the Cosine Similarity Map ---
+    plt.figure(figsize=(14, 12))
     sns.set_theme(style="whitegrid")
-    fig, axes = plt.subplots(1, 2, figsize=(22, 10))
-    unique_classes = np.unique(y_test_viz)
-
-    class_palette = dict(zip(unique_classes, sns.color_palette("tab10", len(unique_classes))))
-    bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
-
-    sns.scatterplot(
-        ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None
-    )
-    for cls in unique_classes:
-        cls_idx = le.transform([cls])[0]
-        center_x, center_y = centers_kpca[cls_idx]
+    
+    all_classes = le.classes_
+    class_palette = dict(zip(all_classes, sns.color_palette("tab20", len(all_classes))))
+    
+    # Plot the Stars (Class Centers)
+    for i, cls in enumerate(all_classes):
+        c_x, c_y = centers_mds[i]
+        plt.scatter(c_x, c_y, marker='*', s=900, color=class_palette[cls], 
+                    edgecolor='black', label=f"{cls} Center", zorder=5)
         
-        axes[0].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[0].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+        # Add a label with the actual similarity value for the sample
+        sim_to_sample = scores_np[i]
+        plt.annotate(f"{cls}\n(Sim: {sim_to_sample:.3f})", (c_x, c_y), 
+                     xytext=(10, 10), textcoords='offset points',
+                     fontsize=9, fontweight='bold', 
+                     bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
 
-    axes[0].set_title('Kernel PCA (RBF) with Train Prototype Centers', fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Principal Component 1')
-    axes[0].set_ylabel('Principal Component 2')
-    axes[0].legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+    # Plot the ONE Test Sample (The Dot)
+    plt.scatter(X_mds[0, 0], X_mds[0, 1], color=class_palette[TARGET_NOVEL_CLASS], 
+                s=600, edgecolor='black', linewidth=4, label="TEST SAMPLE", zorder=10)
 
-    sns.scatterplot(
-        ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False
-    )
-    for cls in unique_classes:
-        cls_idx = le.transform([cls])[0]
-        center_x, center_y = centers_tsne[cls_idx]
-        
-        axes[1].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[1].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[1].set_title('t-SNE Map with Train Prototype Centers', fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('t-SNE Dimension 1')
-    axes[1].set_ylabel('t-SNE Dimension 2')
-
+    plt.title(f"MDS Cosine Similarity Map\nPhysical Distance $\\approx$ (1 - Cosine Similarity)", 
+              fontsize=16, fontweight='bold')
+    plt.xlabel("MDS Dimension 1")
+    plt.ylabel("MDS Dimension 2")
+    
     plt.tight_layout()
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    plt.savefig(os.path.join(PLOT_DIR, 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'), dpi=300)
-    print("Done! Saved plot as 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'")
+    plt.savefig(os.path.join(PLOT_DIR, 'MDS_Cosine_Similarity_Map.png'), dpi=300)
+    print("Done! Saved MDS Cosine Map to 'MDS_Cosine_Similarity_Map.png'")
 
     # === 9. Base vs Novel Evaluation and Visualization ===
-    evaluate_and_visualize_superclasses(
-        y_test, y_pred, X_kpca, X_tsne, y_test_viz, 
-        centers_kpca=centers_kpca, centers_tsne=centers_tsne, le=le
-    )
+    # evaluate_and_visualize_superclasses(
+    #     y_test, y_pred, X_kpca, X_tsne, y_test_viz, 
+    #     centers_kpca=centers_kpca, centers_tsne=centers_tsne, le=le
+    # )
+    # ================================================= NEW: Single Sample Analysis ==================================================
+    print("\n" + "="*50)
+    print(f"ANALYZING SINGLE SAMPLE FROM: {VAL_NOVEL_DIR}")
+    print("="*50)
+
+    # 1. Find and load the single file
+    single_files = glob.glob(os.path.join(VAL_NOVEL_DIR, '*.npy'))
+    if len(single_files) == 0:
+        print("No .npy file found in the novel sample directory!")
+    else:
+        sample_path = single_files[0]
+        print(f"Loading sample: {os.path.basename(sample_path)}")
+        
+        # Load and preprocess
+        raw_feat = np.load(sample_path).flatten().reshape(1, -1)
+        scaled_feat = scaler.transform(raw_feat)
+        feat_tensor = torch.FloatTensor(scaled_feat).to(device)
+        
+        model.eval()
+        with torch.no_grad():
+            logits, hidden_feats = model(feat_tensor)
+            
+            # 2. Calculate scores based on your DISTANCE_METRIC logic
+            if DISTANCE_METRIC in ['l2', 'cosine']:
+                # Calculate similarity to the training prototypes (centers)
+                scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
+            else:
+                # Use raw MLP output
+                scores = logits
+            
+            # Convert to numpy for plotting
+            scores_np = scores.cpu().numpy().flatten()
+            
+        # 3. Visualize the scores
+        plt.figure(figsize=(12, 6))
+        class_names = le.classes_
+        
+        # Sort classes by score for better visualization
+        sorted_indices = np.argsort(scores_np)
+        sorted_scores = scores_np[sorted_indices]
+        sorted_classes = [class_names[i] for i in sorted_indices]
+        
+        colors = ['crimson' if cls == TARGET_NOVEL_CLASS else 'skyblue' for cls in sorted_classes]
+        
+        plt.barh(sorted_classes, sorted_scores, color=colors)
+        plt.xlabel(f'Score ({DISTANCE_METRIC.upper()})')
+        plt.title(f'Classification Scores for Single Novel Sample\n(Higher is better match)')
+        plt.grid(axis='x', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        
+        score_plot_path = os.path.join(PLOT_DIR, 'single_sample_scores.png')
+        plt.savefig(score_plot_path)
+        print(f"Single sample score plot saved to: {score_plot_path}")
+        
+        # Print numerical breakdown
+        print("\nNumerical Scores:")
+        for name, score in zip(class_names, scores_np):
+            is_target = " <--- (Target)" if name == TARGET_NOVEL_CLASS else ""
+            print(f" - {name:35}: {score:.4f}{is_target}")
 
 if __name__ == "__main__":
     main()
