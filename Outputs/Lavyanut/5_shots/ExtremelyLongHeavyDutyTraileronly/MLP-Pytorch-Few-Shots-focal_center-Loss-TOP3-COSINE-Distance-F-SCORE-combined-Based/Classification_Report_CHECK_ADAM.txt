@@ -1,0 +1,19 @@
+Prediction Mode: Prototypes (COSINE)
+Loss Combination : FOCAL_CENTER
+Overall Validation Set Accuracy (Top-3): 92.15%
+                                   precision    recall  f1-score   support
+
+                       Bulldozers     0.7143    0.8571    0.7792        35
+                CementMixerTrucks     0.8136    0.9600    0.8807        50
+ExtremelyLongHeavyDutyTraileronly     1.0000    0.1111    0.2000        45
+                        HeavyDuty     0.7463    0.9615    0.8403        52
+                    LongHeavyDuty     0.8526    0.9925    0.9172       134
+                      MediumSmall     0.9184    0.9574    0.9375        94
+                   MediumStandard     0.9538    0.9509    0.9524       326
+                            Other     0.7949    0.6739    0.7294        46
+                            Small     0.9895    0.9915    0.9905       473
+                     TruckTractor     0.9143    0.7111    0.8000        45
+
+                         accuracy                         0.9215      1300
+                        macro avg     0.8698    0.8167    0.8027      1300
+                     weighted avg     0.9283    0.9215    0.9104      1300

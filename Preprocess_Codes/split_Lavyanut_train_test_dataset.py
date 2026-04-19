@@ -9,7 +9,7 @@ SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/"
 BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/"
 
 # The number of images to be used from the few shots novel class.
-SHOTS = 10
+SHOTS = 5
 
 # Define Target Directories
 TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "train/base_class")
