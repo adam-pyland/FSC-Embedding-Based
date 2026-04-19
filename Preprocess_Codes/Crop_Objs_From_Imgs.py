@@ -238,19 +238,19 @@ def crop_objects_from_Lavyanut_txt_obb():
 
     # --- CHANGED: Added your exact CLASS_MAPPING dictionary ---
     CLASS_MAPPING = {
-        '0': 'Extremely Long Heavy-Duty',
-        '1': 'Long Heavy- Duty',
-        '2': 'Heavy- Duty',
-        '3': 'Medium- Standard',
-        '4': 'Medium- Small',
+        '0': 'ExtremelyLongHeavyDuty',
+        '1': 'LongHeavyDuty',
+        '2': 'HeavyDuty',
+        '3': 'MediumStandard',
+        '4': 'MediumSmall',
         '5': 'Small',
-        '6': 'Extremely Long Heavy-Duty, Trailer only',
-        '7': 'Heavy Duty Tractor Truck',
-        '8': 'Cement Mixer Trucks',
+        '6': 'ExtremelyLongHeavyDutyTraileronly',
+        '7': 'HeavyDutyTractorTruck',
+        '8': 'CementMixerTrucks',
         '9': 'Bulldozers',
-        '10': 'Mobile Cranes',
+        '10': 'MobileCranes',
         '11': 'Forklifts',
-        '12': 'Truck Tractor',
+        '12': 'TruckTractor',
         '13': 'Other'
     }
 

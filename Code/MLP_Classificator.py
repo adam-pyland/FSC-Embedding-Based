@@ -18,10 +18,11 @@ import optuna
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.decomposition import KernelPCA
-from sklearn.manifold import TSNE
+from sklearn.manifold import TSNE, MDS
 from sklearn.metrics import classification_report, f1_score, fbeta_score
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
 import json
 
 # === NEW: PyTorch Metric Learning for Triplet Loss ===
@@ -90,6 +91,7 @@ ALL_CLASSES = [
 ]
 
 TARGET_NOVEL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
+VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
@@ -103,12 +105,12 @@ VAL_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/base_cla
 
 if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
-    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/trailer_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer/'
+    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/trailer_10_shots/'
+    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer_10_shots/'
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
-    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/forklifts_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_forklifts/'
+    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/forklifts_10_shots/'
+    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_forklifts_10_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
 
@@ -230,6 +232,18 @@ def compute_prototype_scores(h2, centers, metric='cosine'):
         raise ValueError("Metric must be 'l2' or 'cosine'")
     return scores
 
+def compute_train_logit_centers(model, dataloader, num_classes, device):
+    model.eval()
+    logit_centers = torch.zeros(num_classes, num_classes).to(device)
+    counts = torch.zeros(num_classes).to(device)
+    with torch.no_grad():
+        for features, labels in dataloader:
+            features, labels = features.to(device), labels.to(device)
+            logits, _ = model(features)
+            logit_centers.index_add_(0, labels, logits)
+            counts.index_add_(0, labels, torch.ones_like(labels, dtype=torch.float))
+    return (logit_centers / counts.clamp(min=1e-8).unsqueeze(1)).cpu().numpy()
+
 def get_predictions(scores, labels, top_k=1, use_top_k=False):
     """
     Returns predictions based on top-1 or top-k logic using provided scores.
@@ -249,11 +263,11 @@ def get_predictions(scores, labels, top_k=1, use_top_k=False):
     
     return final_preds
 
-def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_viz, centers_kpca=None, centers_tsne=None, le=None):
-    base_subclasses =[
-        'Bus', 'Dump Truck', 'Tractor', 
-        'Truck Tractor', 'Excavator', 
-        'Cargo Truck', 'other-vehicle'
+def evaluate_and_visualize_superclasses(y_test, y_pred, X_viz, y_test_viz, centers_viz=None, le=None, metric_name=''):
+    base_subclasses = [
+        'Bulldozers', 'CementMixerTrucks', 'HeavyDuty', 
+        'LongHeavyDuty', 'MediumSmall', 'MediumStandard', 
+        'Other', 'Small', 'TruckTractor'
     ]
     
     def map_to_superclass(labels):
@@ -264,8 +278,8 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
     
     print("\n" + "="*50)
     print("--- BASE vs NOVEL Classification Report ---")
-    file_path = os.path.join(PLOT_DIR, 'Base_Novel_Classification_CHECK_ADAM.txt')
-    report = classification_report(y_test_super, y_pred_super, digits=4)
+    file_path = os.path.join(PLOT_DIR, 'Base_Novel_Classification_Report.txt')
+    report = classification_report(y_test_super, y_pred_super, digits=4, zero_division=0)
     with open(file_path, "w") as f:
         f.write(report)
         print(report)
@@ -273,65 +287,49 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_kpca, X_tsne, y_test_v
     
     y_test_viz_super = map_to_superclass(y_test_viz)
     
-    print("Plotting Base vs Novel separation graphs...")
+    print(f"Plotting Base vs Novel separation ({metric_name})...")
     sns.set_theme(style="whitegrid")
-    fig, axes = plt.subplots(1, 2, figsize=(22, 10))
+    plt.figure(figsize=(14, 10))
     
-    unique_superclasses =['Base', 'Novel']
     super_palette = {'Base': 'royalblue', 'Novel': 'crimson'}
     bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
 
+    # Plot samples
     sns.scatterplot(
-        ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
-        hue=y_test_viz_super, palette=super_palette, s=60, alpha=0.6, edgecolor=None
+        x=X_viz[:, 0], y=X_viz[:, 1],
+        hue=y_test_viz_super, palette=super_palette, s=70, alpha=0.5, edgecolor=None
     )
+
+    # Plot Superclass Centers
+    unique_superclasses = ['Base', 'Novel']
     for cls in unique_superclasses:
         if cls in y_test_viz_super:
-            if centers_kpca is not None and le is not None:
-                superclass_classes =[c for c in le.classes_ if ('Base' if c in base_subclasses else 'Novel') == cls]
+            # Calculate the center of the superclass stars
+            if centers_viz is not None and le is not None:
+                # Find which indices in the label encoder belong to this superclass
+                superclass_classes = [c for c in le.classes_ if map_to_superclass([c])[0] == cls]
                 superclass_indices = le.transform(superclass_classes).astype(int)
-                center_x = np.mean(centers_kpca[superclass_indices, 0])
-                center_y = np.mean(centers_kpca[superclass_indices, 1])
+                center_x = np.mean(centers_viz[superclass_indices, 0])
+                center_y = np.mean(centers_viz[superclass_indices, 1])
             else:
-                cls_points = X_kpca[y_test_viz_super == cls]
+                cls_points = X_viz[y_test_viz_super == cls]
                 center_x, center_y = np.mean(cls_points[:, 0]), np.mean(cls_points[:, 1])
                 
-            axes[0].scatter(center_x, center_y, marker='*', s=800, color=super_palette[cls], edgecolor='black', zorder=10)
-            axes[0].annotate(f"{cls} Train Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
-                             fontsize=12, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+            plt.scatter(center_x, center_y, marker='*', s=1200, color=super_palette[cls], 
+                        edgecolor='black', linewidth=2, zorder=10, label=f"{cls} Prototype")
+            plt.annotate(f"{cls} Train Center", (center_x, center_y), xytext=(15, 15), 
+                         textcoords='offset points', fontsize=12, fontweight='bold', 
+                         bbox=bbox_props, zorder=11)
 
-    axes[0].set_title('Kernel PCA: Base vs Novel Classes (Train Centers)', fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Principal Component 1')
-    axes[0].set_ylabel('Principal Component 2')
-    axes[0].legend(title='Superclass', bbox_to_anchor=(1.05, 1), loc='upper left')
-
-    sns.scatterplot(
-        ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
-        hue=y_test_viz_super, palette=super_palette, s=60, alpha=0.6, edgecolor=None, legend=False
-    )
-    for cls in unique_superclasses:
-        if cls in y_test_viz_super:
-            if centers_tsne is not None and le is not None:
-                superclass_classes =[c for c in le.classes_ if ('Base' if c in base_subclasses else 'Novel') == cls]
-                superclass_indices = le.transform(superclass_classes).astype(int)
-                center_x = np.mean(centers_tsne[superclass_indices, 0])
-                center_y = np.mean(centers_tsne[superclass_indices, 1])
-            else:
-                cls_points = X_tsne[y_test_viz_super == cls]
-                center_x, center_y = np.median(cls_points[:, 0]), np.median(cls_points[:, 1])
-                
-            axes[1].scatter(center_x, center_y, marker='*', s=800, color=super_palette[cls], edgecolor='black', zorder=10)
-            axes[1].annotate(f"{cls} Train Center", (center_x, center_y), xytext=(10, 10), textcoords='offset points',
-                             fontsize=12, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[1].set_title('t-SNE Map: Base vs Novel Classes (Train Centers)', fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('t-SNE Dimension 1')
-    axes[1].set_ylabel('t-SNE Dimension 2')
+    plt.title(f'Base vs Novel Separation Map ({metric_name})\nDistance represents Model Logic', 
+              fontsize=16, fontweight='bold')
+    plt.xlabel('Dimension 1')
+    plt.ylabel('Dimension 2')
+    plt.legend(title='Superclass', loc='upper right')
 
     plt.tight_layout()
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    plt.savefig(os.path.join(PLOT_DIR, 'Base_vs_Novel_Separation_NO_CARS_VANS.png'), dpi=300)
-    print("Done! Saved plot as 'Base_vs_Novel_Separation_NO_CARS_VANS.png'")
+    plt.savefig(os.path.join(PLOT_DIR, f'Base_vs_Novel_Separation_{metric_name}.png'), dpi=300)
+    print(f"Done! Saved superclass plot as 'Base_vs_Novel_Separation_{metric_name}.png'")
 
 # ==========================================
 # 3. Main Script Pipeline
@@ -773,94 +771,122 @@ def main():
         f.write(report)
         print(report)
 
-    # --- 5. Sample Validation Data for Visualization ---
-    print("\nSampling Validation data for clear visualization...")
-    X_test_viz =[]
-    y_test_viz =[]
-    X_features_viz =[]
+    # --- 5. Sampling Data for Visualization (Train or Test) ---
+    print(f"\nSampling {VISUALIZATION_SOURCE.upper()} data for visualization...")
+    
+    if VISUALIZATION_SOURCE == 'train':
+        X_source = X_train_scaled
+        y_source = le.inverse_transform(y_train_encoded)
+    else:
+        X_source = X_test_scaled
+        y_source = y_test # Original string labels
+        
+    X_viz_raw = []
+    y_test_viz = []
     samples_per_class = 200 
     
-    for cls in np.unique(y_test):
-        idx = np.where(y_test == cls)[0]
+    unique_classes_in_source = np.unique(y_source)
+    for cls in unique_classes_in_source:
+        idx = np.where(y_source == cls)[0]
         selected_idx = np.random.choice(idx, min(samples_per_class, len(idx)), replace=False)
-        X_test_viz.extend(X_test_scaled[selected_idx])
-        y_test_viz.extend(y_test[selected_idx])
-        X_features_viz.extend(X_separated_features_all[selected_idx])
+        X_viz_raw.append(X_source[selected_idx])
+        y_test_viz.extend([cls] * len(selected_idx))
         
-    X_test_viz = np.array(X_test_viz)
+    X_viz_raw = np.concatenate(X_viz_raw, axis=0)
     y_test_viz = np.array(y_test_viz)
-    X_separated_features = np.array(X_features_viz)
 
-    # --- 7. Dimensionality Reduction ---
-    print("Applying Dimensionality Reduction on Combined Data (Validation + Train Centers)...")
+    # --- 6. Extract Features/Logits for the sampled data ---
+    model.eval()
+    X_viz_tensor = torch.FloatTensor(X_viz_raw).to(device)
+    with torch.no_grad():
+        # Get both logits and embeddings (h2) for the sampled points
+        viz_logits, viz_embeddings = model(X_viz_tensor)
+        
+        # This will be used by the MDS logic in Section 7
+        X_separated_features = viz_embeddings.cpu().numpy()
+        X_logits_features = viz_logits.cpu().numpy()
+
+    # --- 7. Dynamic Dimensionality Reduction based on DISTANCE_METRIC ---
+    print(f"Applying Dimensionality Reduction based on {DISTANCE_METRIC.upper()} logic...")
+
+    if DISTANCE_METRIC == 'logits':
+        # Points = Sample Logits + Center Logits
+        train_logit_centers = compute_train_logit_centers(model, final_train_loader, num_classes, device)
+        combined_points = np.vstack([X_logits_features, train_logit_centers])
+        print("Computing Logit-based Euclidean distance matrix...")
+        dist_matrix = euclidean_distances(combined_points)
+
+    elif DISTANCE_METRIC == 'cosine':
+        # Points = Sample Embeddings + Center Embeddings
+        combined_points = np.vstack([X_separated_features, train_centers_np])
+        print("Computing Cosine distance matrix (1 - Similarity)...")
+        sim_matrix = cosine_similarity(combined_points)
+        dist_matrix = 1 - sim_matrix
+        dist_matrix = np.maximum(dist_matrix, 0)
+
+    else: # DISTANCE_METRIC == 'l2'
+        combined_points = np.vstack([X_separated_features, train_centers_np])
+        print("Computing Euclidean distance matrix (L2)...")
+        dist_matrix = euclidean_distances(combined_points)
+
+    # Apply MDS
+    mds = MDS(n_components=2, dissimilarity='precomputed', random_state=42, normalized_stress='auto')
+    coords = mds.fit_transform(dist_matrix)
     
-    combined_features = np.vstack([X_separated_features, train_centers_np])
+    X_viz_2d = coords[:-num_classes]           
+    centers_2d = coords[-num_classes:]  
 
-    print("Applying Kernel PCA (RBF)...")
-    kpca = KernelPCA(n_components=2, kernel='rbf', gamma=None) 
-    combined_kpca = kpca.fit_transform(combined_features)
-    
-    X_kpca = combined_kpca[:-num_classes]           
-    centers_kpca = combined_kpca[-num_classes:]     
-
-    print("Applying t-SNE...")
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    combined_tsne = tsne.fit_transform(combined_features)
-    
-    X_tsne = combined_tsne[:-num_classes]           
-    centers_tsne = combined_tsne[-num_classes:]     
-
-    # --- 8. Plotting ---
-    print("Plotting graphs with Training Prototype centers...")
+    # --- 8. Dynamic Plotting ---
+    print("Generating Plot...")
+    plt.figure(figsize=(16, 12))
     sns.set_theme(style="whitegrid")
-    fig, axes = plt.subplots(1, 2, figsize=(22, 10))
-    unique_classes = np.unique(y_test_viz)
+    
+    unique_classes_viz = np.unique(y_test_viz)
+    class_palette = dict(zip(le.classes_, sns.color_palette("tab20", len(le.classes_))))
+    bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.8)
 
-    class_palette = dict(zip(unique_classes, sns.color_palette("tab10", len(unique_classes))))
-    bbox_props = dict(boxstyle="round,pad=0.3", fc="white", ec="gray", lw=1, alpha=0.85)
-
+    # 1. Plot the cloud of points (Validation Samples)
     sns.scatterplot(
-        ax=axes[0], x=X_kpca[:, 0], y=X_kpca[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None
+        x=X_viz_2d[:, 0], y=X_viz_2d[:, 1],
+        hue=y_test_viz, palette=class_palette, s=50, alpha=0.5, edgecolor=None
     )
-    for cls in unique_classes:
-        cls_idx = le.transform([cls])[0]
-        center_x, center_y = centers_kpca[cls_idx]
+
+    # 2. Plot the Stars (Train Prototype Centers)
+    for i, cls in enumerate(le.classes_):
+        c_x, c_y = centers_2d[i]
+        plt.scatter(c_x, c_y, marker='*', s=1000, color=class_palette[cls], 
+                    edgecolor='black', linewidth=1.5, zorder=10)
         
-        axes[0].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[0].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
+        plt.annotate(cls, (c_x, c_y), xytext=(10, 10), textcoords='offset points',
+                     fontsize=10, fontweight='bold', bbox=bbox_props, zorder=11)
 
-    axes[0].set_title('Kernel PCA (RBF) with Train Prototype Centers', fontsize=14, fontweight='bold')
-    axes[0].set_xlabel('Principal Component 1')
-    axes[0].set_ylabel('Principal Component 2')
-    axes[0].legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+    title_str = {
+        'cosine': "MDS Cosine Map: Physical Distance $\\approx$ 1 - Cosine Similarity",
+        'l2': "MDS Euclidean Map: Physical Distance $\\approx$ L2 Embedding Distance",
+        'logits': "MDS Logit Map: Physical Distance $\\approx$ Distance between Class Scores"
+    }
 
-    sns.scatterplot(
-        ax=axes[1], x=X_tsne[:, 0], y=X_tsne[:, 1],
-        hue=y_test_viz, palette=class_palette, s=60, alpha=0.6, edgecolor=None, legend=False
-    )
-    for cls in unique_classes:
-        cls_idx = le.transform([cls])[0]
-        center_x, center_y = centers_tsne[cls_idx]
-        
-        axes[1].scatter(center_x, center_y, marker='*', s=800, color=class_palette[cls], edgecolor='black', zorder=10)
-        axes[1].annotate(f"{cls}", (center_x, center_y), xytext=(8, 8), textcoords='offset points',
-                         fontsize=10, fontweight='bold', color='black', bbox=bbox_props, zorder=11)
-
-    axes[1].set_title('t-SNE Map with Train Prototype Centers', fontsize=14, fontweight='bold')
-    axes[1].set_xlabel('t-SNE Dimension 1')
-    axes[1].set_ylabel('t-SNE Dimension 2')
+    plt.title(f"{title_str.get(DISTANCE_METRIC, 'MDS Distance Map')}\n"
+              f"({VISUALIZATION_SOURCE.capitalize()} Samples vs. Training Centers)", 
+              fontsize=16, fontweight='bold')
+    plt.xlabel("Dimension 1")
+    plt.ylabel("Dimension 2")
+    plt.legend(title='Vehicle Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
 
     plt.tight_layout()
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    plt.savefig(os.path.join(PLOT_DIR, 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'), dpi=300)
-    print("Done! Saved plot as 'Test_Set_Labeled_Centers_NO_CARS_VANS.png'")
+    plot_filename = f'Distance_Map_{DISTANCE_METRIC.upper()}_{VISUALIZATION_SOURCE}_Source.png'
+    plt.savefig(os.path.join(PLOT_DIR, plot_filename), dpi=300)
+    print(f"Done! Saved distance-based plot as '{plot_filename}'")
 
     # === 9. Base vs Novel Evaluation and Visualization ===
     evaluate_and_visualize_superclasses(
-        y_test, y_pred, X_kpca, X_tsne, y_test_viz, 
-        centers_kpca=centers_kpca, centers_tsne=centers_tsne, le=le
+        y_test, 
+        y_pred, 
+        X_viz_2d,            # The MDS coordinates for samples
+        y_test_viz, 
+        centers_viz=centers_2d, # The MDS coordinates for stars
+        le=le,
+        metric_name=DISTANCE_METRIC.upper()
     )
 
 if __name__ == "__main__":

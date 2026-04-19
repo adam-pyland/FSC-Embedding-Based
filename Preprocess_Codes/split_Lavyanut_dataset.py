@@ -8,14 +8,17 @@ import random
 SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/"
 BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/"
 
+# The number of images to be used from the few shots novel class.
+SHOTS = 10
+
 # Define Target Directories
 TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "train/base_class")
-TRAIN_FORK_DIR = os.path.join(BASE_OUTPUT_DIR, "train/forklifts_few_shots")
-TRAIN_TRAIL_DIR = os.path.join(BASE_OUTPUT_DIR, "train/trailer_few_shots")
+TRAIN_FORK_DIR = os.path.join(BASE_OUTPUT_DIR, f"train/forklifts_{SHOTS}_shots")
+TRAIN_TRAIL_DIR = os.path.join(BASE_OUTPUT_DIR, f"train/trailer_{SHOTS}_shots")
 
 TEST_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "test/base_class")
-TEST_FORK_DIR = os.path.join(BASE_OUTPUT_DIR, "test/novel_class_forklifts")
-TEST_TRAIL_DIR = os.path.join(BASE_OUTPUT_DIR, "test/novel_class_trailer")
+TEST_FORK_DIR = os.path.join(BASE_OUTPUT_DIR, f"test/novel_class_forklifts_{SHOTS}_shots")
+TEST_TRAIL_DIR = os.path.join(BASE_OUTPUT_DIR, f"test/novel_class_trailer_{SHOTS}_shots")
 
 # Sanitized Novel Class Names (after spaces, commas, and hyphens are removed)
 NOVEL_FORKLIFT = "Forklifts"
@@ -23,6 +26,8 @@ NOVEL_TRAILER = "ExtremelyLongHeavyDutyTraileronly"
 
 # Previously mentioned excluded classes (<100 objects) sanitized
 EXCLUDED_CLASSES =["ExtremelyLongHeavyDuty", "HeavyDutyTractorTruck", "MobileCranes"]
+
+
 
 random.seed(42) # For reproducible splits
 
@@ -109,9 +114,9 @@ def split_dataset():
     fork_images = [img for img, data in image_catalog.items() if len(data['forklifts']) > 0]
     trail_images =[img for img, data in image_catalog.items() if len(data['trailers']) > 0]
 
-    # 1. Grab images containing Forklifts until we reach >= 20 objects
+    # 1. Grab images containing Forklifts until we reach >= SHOTS objects
     for img in fork_images:
-        if train_fork_cnt < 20:
+        if train_fork_cnt < SHOTS:
             if img not in train_images:
                 unassigned_forks =[i for i in fork_images if i not in train_images]
                 unassigned_trails =[i for i in trail_images if i not in train_images]
@@ -129,9 +134,9 @@ def split_dataset():
                 train_trail_cnt += len(image_catalog[img]['trailers'])
                 train_base_cnt += len(image_catalog[img]['base'])
 
-    # 2. Grab images containing Trailers until we reach >= 20 objects
+    # 2. Grab images containing Trailers until we reach >= SHOTS objects
     for img in trail_images:
-        if train_trail_cnt < 20:
+        if train_trail_cnt < SHOTS:
             if img not in train_images:
                 unassigned_trails = [i for i in trail_images if i not in train_images]
                 unassigned_forks = [i for i in fork_images if i not in train_images]
@@ -164,7 +169,7 @@ def split_dataset():
             train_images.add(img)
             train_base_cnt += len(image_catalog[img]['base'])
         else:
-            test_images.add(img) # The 20% remainder goes to test
+            test_images.add(img) # The SHOTS% remainder goes to test
 
     # --- Step B: Copy Files to Destinations ---
     print("Copying files to train and test directories...")
@@ -172,15 +177,15 @@ def split_dataset():
     
     for img, data in image_catalog.items():
         if img in train_images:
-            # Copy exactly 20 Forklifts to Train
+            # Copy exactly SHOTS Forklifts to Train
             for f in data['forklifts']:
-                if copied_train_fork < 20:
+                if copied_train_fork < SHOTS:
                     shutil.copy(f, TRAIN_FORK_DIR)
                     copied_train_fork += 1
             
-            # Copy exactly 20 Trailers to Train
+            # Copy exactly SHOTS Trailers to Train
             for f in data['trailers']:
-                if copied_train_trail < 20:
+                if copied_train_trail < SHOTS:
                     shutil.copy(f, TRAIN_TRAIL_DIR)
                     copied_train_trail += 1
                     
@@ -189,7 +194,7 @@ def split_dataset():
                 shutil.copy(f, TRAIN_BASE_DIR)
                 
             # NOTE: If an image had a 21st Forklift, it is ignored here. 
-            # It is NOT copied to Train (maintaining your 20-shot rule) and 
+            # It is NOT copied to Train (maintaining your SHOTS-shot rule) and 
             # NOT copied to Test (preventing image-background data leakage).
 
         elif img in test_images:

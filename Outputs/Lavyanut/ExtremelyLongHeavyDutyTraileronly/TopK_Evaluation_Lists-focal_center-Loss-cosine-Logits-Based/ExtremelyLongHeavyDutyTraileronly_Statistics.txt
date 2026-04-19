@@ -1,0 +1,28 @@
+========================================
+PREDICTION-BASED TOP-K STATISTICS
+Target Class Evaluated: ExtremelyLongHeavyDutyTraileronly
+Prediction Mode: COSINE
+========================================
+
+Total Validation Samples Evaluated: 857
+
+--- TOP-1 Category ---
+Total objects scored into this category: 15
+Objects actually belonging to ground truth 'ExtremelyLongHeavyDutyTraileronly': 10
+Accuracy (Real / Total) within category: 66.67%
+
+--- TOP-2 Category ---
+Total objects scored into this category: 24
+Objects actually belonging to ground truth 'ExtremelyLongHeavyDutyTraileronly': 7
+Accuracy (Real / Total) within category: 29.17%
+
+--- TOP-3 Category ---
+Total objects scored into this category: 83
+Objects actually belonging to ground truth 'ExtremelyLongHeavyDutyTraileronly': 10
+Accuracy (Real / Total) within category: 12.05%
+
+--- Not in TOP-3 Category ---
+Total objects scored into this category: 735
+Objects actually belonging to ground truth 'ExtremelyLongHeavyDutyTraileronly': 2
+Accuracy (Real / Total) within category: 0.27%
+

@@ -1,6 +1,7 @@
 import os
 import glob
 import numpy as np
+import matplotlib.pyplot as plt
 from joblib import load
 
 import torch
@@ -11,35 +12,60 @@ from torch.utils.data import DataLoader, TensorDataset
 # ==========================================
 # Global Configuration
 # ==========================================
+USE_TOP_K_METRICS = True
+TOP_K_VALUE = 3
+CUSTOM_METRIC_TYPE = 'combined'
 
 # Select your evaluation metric: 'l2', 'cosine', or 'logits'
 DISTANCE_METRIC = 'cosine'
 
 # Set the target class to track (e.g., 'Trailer'). 
 # Must be set to evaluate prediction-based rankings.
-TARGET_EVAL_CLASS = 'Trailer'
+TARGET_EVAL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 
-# Directories (Change these if they differ from your environment)
-TRAIN_BASE_DIR = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/base_class'
-TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/train/novel_class_few_shot_trailer/'
-
-VAL_BASE_DIR = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/val/base_class'
-VAL_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/FAIR1M/new_attempt/archive/Vehicle_Dataset/Image_Obj_Embs/val/novel_class'
+Dataset_Name = 'Lavyanut'
 
 # Path to the directory where the MLP model, scaler, and label encoder are saved
 LOSS_COMBINATION = 'focal_center'
-SAVED_MODEL_DIR = f"models/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP3-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
+SAVED_MODEL_DIR = f"models/{Dataset_Name}/{TARGET_EVAL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+
 
 # Output directory for the text files
-OUTPUT_DIR = f"Outputs/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
+OUTPUT_DIR = f"Outputs/{Dataset_Name}/{TARGET_EVAL_CLASS}/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-ALL_CLASSES =[
-    'Bus', 'Dump Truck', 'Tractor', 
-    'Truck Tractor', 'Excavator', 
-    'Cargo Truck', 'Trailer'
+
+ALL_CLASSES = [
+'Bulldozers',
+'CementMixerTrucks',
+'ExtremelyLongHeavyDutyTraileronly',
+'Forklifts',
+'HeavyDuty',
+'LongHeavyDuty',
+'MediumSmall',
+'MediumStandard',
+'Other',
+'Small',
+'TruckTractor'
 ]
 SAFE_CLASS_NAMES =[cls.replace(" ", "_") for cls in ALL_CLASSES]
+
+# Directories (Change these if they differ from your environment)
+TRAIN_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/base_class/'
+VAL_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/base_class/'
+
+if TARGET_EVAL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
+    ALL_CLASSES.remove('Forklifts')
+    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/trailer_few_shots/'
+    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer/'
+elif TARGET_EVAL_CLASS == 'Forklifts':
+    ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
+    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/forklifts_few_shots/'
+    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_forklifts/'
+else:
+    raise ValueError("Unknown target class for directories!")
+
+
 
 # ==========================================
 # 1. PyTorch Model Definition
@@ -108,6 +134,63 @@ def load_features_and_filenames(directory, X_list, y_list, filenames_list):
                 filenames_list.append(filename)
                 break
 
+def plot_statistics(top1_tot, top1_real, top2_tot, top2_real, top3_tot, top3_real, not3_tot, not3_real, target_class, output_dir):
+    categories =['TOP-1', 'TOP-2', 'TOP-3', 'Not in TOP-3']
+    
+    totals = np.array([top1_tot, top2_tot, top3_tot, not3_tot])
+    reals = np.array([top1_real, top2_real, top3_real, not3_real])
+    falses = totals - reals
+    
+    # Avoid division by zero
+    accuracies = np.divide(reals, totals, out=np.zeros_like(reals, dtype=float), where=totals!=0) * 100
+
+    fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle(f'Prediction-Based Top-K Evaluation: {target_class}', fontsize=16, fontweight='bold')
+
+    # --- Plot 1: Stacked Bar Chart (Counts) ---
+    axs[0].bar(categories, reals, label=f'Actual {target_class} (True)', color='forestgreen')
+    axs[0].bar(categories, falses, bottom=reals, label='Other Classes (False Alarms)', color='lightcoral')
+    axs[0].set_title('Prediction Distribution (Counts)')
+    axs[0].set_ylabel('Number of Objects')
+    axs[0].legend()
+    for i, (r, t) in enumerate(zip(reals, totals)):
+        if t > 0:
+            axs[0].text(i, t + (max(totals)*0.02), f"Total: {t}", ha='center', fontsize=10)
+            axs[0].text(i, r / 2 if r > 0 else 0, f"{r}", ha='center', color='white', fontweight='bold')
+
+    # --- Plot 2: Accuracy Bar Chart ---
+    bars = axs[1].bar(categories, accuracies, color='royalblue')
+    axs[1].set_title('Accuracy within Category (%)')
+    axs[1].set_ylabel('Accuracy (%)')
+    axs[1].set_ylim(0, 100)
+    for bar in bars:
+        yval = bar.get_height()
+        axs[1].text(bar.get_x() + bar.get_width()/2, yval + 1.5, f"{yval:.1f}%", ha='center', fontweight='bold')
+
+    # --- Plot 3: Pie Chart (Recall/Where did the REAL objects go?) ---
+    # Only plot if there are actually real objects in that category
+    labels =[cat for cat, r in zip(categories, reals) if r > 0]
+    sizes = [r for r in reals if r > 0]
+    colors =['#ff9999','#66b3ff','#99ff99','#ffcc99'][:len(sizes)]
+    
+    if sum(sizes) > 0:
+        axs[2].pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=140, explode=[0.05]*len(sizes))
+        axs[2].set_title(f'Where did the {sum(sizes)} actual Targets rank?')
+    else:
+        axs[2].text(0.5, 0.5, "No Real Targets Found", ha='center', va='center')
+        axs[2].axis('off')
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.88)
+    
+    # Save the plot
+    plot_path = os.path.join(output_dir, f"{target_class}_Evaluation_Plots.png")
+    plt.savefig(plot_path, dpi=300)
+    print(f"Saved evaluation plots to: {plot_path}")
+    
+    # Uncomment the next line if you want the script to pop up the window and show the graph while running
+    # plt.show()
+
 # ==========================================
 # 3. Main Evaluation Pipeline
 # ==========================================
@@ -123,9 +206,9 @@ def main():
     print("="*50)
 
     # 1. Load Scaler and Label Encoder
-    scaler_file = os.path.join(SAVED_MODEL_DIR, 'saved_scaler_NO_CARS_VANS.joblib')
-    le_file = os.path.join(SAVED_MODEL_DIR, 'saved_le_NO_CARS_VANS.joblib')
-    best_model_file = os.path.join(SAVED_MODEL_DIR, 'best_mlp_NO_CARS_VANS.pth')
+    scaler_file = os.path.join(SAVED_MODEL_DIR, 'saved_scaler.joblib')
+    le_file = os.path.join(SAVED_MODEL_DIR, 'saved_le.joblib')
+    best_model_file = os.path.join(SAVED_MODEL_DIR, 'best_mlp.pth')
 
     if not (os.path.exists(scaler_file) and os.path.exists(le_file) and os.path.exists(best_model_file)):
         print(f"Error: Could not find model, scaler, or LabelEncoder in {SAVED_MODEL_DIR}")
@@ -271,5 +354,14 @@ def main():
     print(f"Categorized into TOP-3: {len(top3_list)} (Actually real: {top3_real_count})")
     print(f"Not in TOP-3: {len(not_in_top3_list)} (Actually real: {not_in_top3_real_count})")
 
+    # Generate Visualizations
+    plot_statistics(
+        len(top1_list), top1_real_count,
+        len(top2_list), top2_real_count,
+        len(top3_list), top3_real_count,
+        len(not_in_top3_list), not_in_top3_real_count,
+        TARGET_EVAL_CLASS, OUTPUT_DIR
+    )
+    
 if __name__ == "__main__":
     main()
