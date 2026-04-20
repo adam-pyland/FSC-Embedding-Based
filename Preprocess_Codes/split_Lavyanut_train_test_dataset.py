@@ -116,7 +116,7 @@ def split_dataset():
 
     # 1. Grab images containing Forklifts until we reach >= SHOTS objects
     for img in fork_images:
-        if train_fork_cnt < SHOTS:
+        if train_fork_cnt < 20:
             if img not in train_images:
                 unassigned_forks =[i for i in fork_images if i not in train_images]
                 unassigned_trails =[i for i in trail_images if i not in train_images]
@@ -136,7 +136,7 @@ def split_dataset():
 
     # 2. Grab images containing Trailers until we reach >= SHOTS objects
     for img in trail_images:
-        if train_trail_cnt < SHOTS:
+        if train_trail_cnt < 20:
             if img not in train_images:
                 unassigned_trails = [i for i in trail_images if i not in train_images]
                 unassigned_forks = [i for i in fork_images if i not in train_images]
