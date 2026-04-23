@@ -78,12 +78,12 @@ BEST_HYPERPARAMETERS=None
 
 # BEST_HYPERPARAMETERS = {
 #     "batch_size": 256,
-#     "gamma": 1.3056901954219682,
-#     "center_weight": 0.01836520533009293,
-#     "lr": 0.0012824442659618756,
-#     "weight_decay": 0.00011775557151085135,
-#     "weight_smoothing": 0.3462141540802811,
-#     "novel_multiplier": 5.310693283800326
+#     "gamma": 2.550721499551062,
+#     "center_weight": 0.012832736832682188,
+#     "lr": 0.002569989513949338,
+#     "weight_decay": 4.0068240695664046e-05,
+#     "weight_smoothing": 0.7354107029514654,
+#     "novel_multiplier": 3.0341131621210753
 # }
 
 
@@ -106,7 +106,7 @@ ALL_CLASSES = [
 'TruckTractor'
 ]
 
-TARGET_NOVEL_CLASS = 'Forklifts'
+TARGET_NOVEL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
@@ -115,9 +115,9 @@ SHOTS = 5
 
 
 
-SAVE_DIR = f"models6_Based_on_Froklifts/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models3/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs6_Based_on_Forklifts/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs3/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'

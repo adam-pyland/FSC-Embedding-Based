@@ -74,17 +74,17 @@ LOSS_COMBINATION = 'focal_center'
 CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
 
-BEST_HYPERPARAMETERS=None
+# BEST_HYPERPARAMETERS=None
 
-# BEST_HYPERPARAMETERS = {
-#     "batch_size": 256,
-#     "gamma": 1.3056901954219682,
-#     "center_weight": 0.01836520533009293,
-#     "lr": 0.0012824442659618756,
-#     "weight_decay": 0.00011775557151085135,
-#     "weight_smoothing": 0.3462141540802811,
-#     "novel_multiplier": 5.310693283800326
-# }
+BEST_HYPERPARAMETERS = {
+    "batch_size": 256,
+    "gamma": 1.3056901954219682,
+    "center_weight": 0.01836520533009293,
+    "lr": 0.0012824442659618756,
+    "weight_decay": 0.00011775557151085135,
+    "weight_smoothing": 0.3462141540802811,
+    "novel_multiplier": 5.310693283800326
+}
 
 
 MAX_EPOCHS = 500
@@ -111,13 +111,13 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-SHOTS = 5
+SHOTS = 10
 
 
 
-SAVE_DIR = f"models6_Based_on_Froklifts/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models5/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs6_Based_on_Forklifts/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs5/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
