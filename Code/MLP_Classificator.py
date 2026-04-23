@@ -99,7 +99,7 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-SHOTS = 5
+SHOTS = 10
 
 
 
@@ -133,7 +133,6 @@ class MLP_PyTorch(nn.Module):
     Input -> Linear(512) -> ReLU -> Linear(256) -> ReLU -> Linear(num_classes)
     """
     def __init__(self, input_dim, num_classes):
-        def __init__(self, input_dim, num_classes):
         super(MLP_PyTorch, self).__init__()
         self.fc1 = nn.Linear(input_dim, 256) # Reduced size
         self.dropout1 = nn.Dropout(p=0.4)    # Added dropout
@@ -141,13 +140,13 @@ class MLP_PyTorch(nn.Module):
         self.dropout2 = nn.Dropout(p=0.4)    # Added dropout
         self.fc3 = nn.Linear(128, num_classes)
 
-        def forward(self, x):
-            h1 = F.relu(self.fc1(x))
-            h1 = self.dropout1(h1)
-            h2 = F.relu(self.fc2(h1))
-            h2_drop = self.dropout2(h2)
-            logits = self.fc3(h2_drop)
-            return logits, h2 # Still return pure h2 for metric distances
+    def forward(self, x):
+        h1 = F.relu(self.fc1(x))
+        h1 = self.dropout1(h1)
+        h2 = F.relu(self.fc2(h1))
+        h2_drop = self.dropout2(h2)
+        logits = self.fc3(h2_drop)
+        return logits, h2 # Still return pure h2 for metric distances
     
 
 class FocalLoss(nn.Module):
@@ -215,7 +214,7 @@ def compute_train_centers(model, dataloader, num_classes, device):
     for each class in the 256-D space.
     """
     model.eval()
-    centers = torch.zeros(num_classes, 256).to(device)
+    centers = torch.zeros(num_classes, 128).to(device)
     counts = torch.zeros(num_classes).to(device)
     
     with torch.no_grad():
@@ -489,7 +488,7 @@ def main():
 
             trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
             criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
-            criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
+            criterion_center = CenterLoss(num_classes=num_classes, feat_dim=128, device=device)
             
             # Setup Miner and Triplet margin loss dynamically
             miner = pml_miners.BatchHardMiner(distance=pml_dist)
@@ -629,7 +628,7 @@ def main():
         class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
         criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
-        criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
+        criterion_center = CenterLoss(num_classes=num_classes, feat_dim=128, device=device)
         final_center_weight = best_params['center_weight']
 
         miner = pml_miners.BatchHardMiner(distance=pml_dist)
