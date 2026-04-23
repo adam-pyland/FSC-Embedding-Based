@@ -29,7 +29,7 @@ CLASS_MAPPING = {
 # ---------- Step 1: Find best file ----------
 best_file = None
 best_unique_classes = 0
-best_lines = []
+best_lines =[]
 
 for file in os.listdir(ann_dir):
     if not file.endswith(".txt"):
@@ -37,15 +37,22 @@ for file in os.listdir(ann_dir):
 
     path = os.path.join(ann_dir, file)
     with open(path, "r") as f:
-        lines = [l.strip() for l in f if l.strip()]
+        lines =[l.strip() for l in f if l.strip()]
 
     classes = [line.split()[0] for line in lines]
     unique_classes = set(classes)
+
+    # REQUIREMENT: Must contain ExtremelyLongHeavyDutyTraileronly (Class '6')
+    if '6' not in unique_classes:
+        continue
 
     if len(unique_classes) > best_unique_classes:
         best_unique_classes = len(unique_classes)
         best_file = file
         best_lines = lines
+
+if best_file is None:
+    raise ValueError("Could not find any annotation file containing the 'ExtremelyLongHeavyDutyTraileronly' class (id '6').")
 
 print(f"Selected file: {best_file} ({best_unique_classes} classes)")
 
@@ -72,13 +79,17 @@ h, w = img.shape[:2]
 class_counts = defaultdict(int)
 class_areas = defaultdict(list)
 
+# Configuration for text size (adjustable depending on image resolution)
+font_scale = 5.0
+font_thickness = 8
+
 for line in best_lines:
     parts = line.split()
     cls = parts[0]
     coords = list(map(float, parts[1:]))
 
     # convert normalized → pixels
-    pts = []
+    pts =[]
     for i in range(0, len(coords), 2):
         x = coords[i] * w
         y = coords[i+1] * h
@@ -96,11 +107,13 @@ for line in best_lines:
     pts_int = pts.astype(np.int32)
     color = tuple(int(c) for c in np.random.RandomState(int(cls)).randint(0, 255, 3))
 
-    cv2.polylines(img, [pts_int], True, color, 20)
+    cv2.polylines(img,[pts_int], True, color, 20)
 
     label = CLASS_MAPPING.get(cls, cls)
+    
+    # REQUIREMENT: Much bigger labels
     cv2.putText(img, label, tuple(pts_int[0]),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, font_thickness, cv2.LINE_AA)
 
 # ---------- Step 4: Save image ----------
 cv2.imwrite(out_img_path, img)
