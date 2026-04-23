@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import optuna
 
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler, LabelEncoder, Normalizer
 from sklearn.decomposition import KernelPCA
 from sklearn.manifold import TSNE, MDS
 from sklearn.metrics import classification_report, f1_score, fbeta_score
@@ -55,7 +55,7 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
 
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
 
@@ -99,7 +99,7 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-SHOTS = 20
+SHOTS = 5
 
 
 
@@ -133,16 +133,21 @@ class MLP_PyTorch(nn.Module):
     Input -> Linear(512) -> ReLU -> Linear(256) -> ReLU -> Linear(num_classes)
     """
     def __init__(self, input_dim, num_classes):
+        def __init__(self, input_dim, num_classes):
         super(MLP_PyTorch, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 512)
-        self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, num_classes)
+        self.fc1 = nn.Linear(input_dim, 256) # Reduced size
+        self.dropout1 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc2 = nn.Linear(256, 128)       # Reduced size
+        self.dropout2 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc3 = nn.Linear(128, num_classes)
 
-    def forward(self, x):
-        h1 = F.relu(self.fc1(x))
-        h2 = F.relu(self.fc2(h1))
-        logits = self.fc3(h2)
-        return logits, h2  # Returning h2 to extract the 256-D features easily
+        def forward(self, x):
+            h1 = F.relu(self.fc1(x))
+            h1 = self.dropout1(h1)
+            h2 = F.relu(self.fc2(h1))
+            h2_drop = self.dropout2(h2)
+            logits = self.fc3(h2_drop)
+            return logits, h2 # Still return pure h2 for metric distances
     
 
 class FocalLoss(nn.Module):
@@ -445,7 +450,8 @@ def main():
         X_train_scaled = scaler.fit_transform(X_train)
     else:
         print("\nNo saved model found. Preparing for Training...")
-        scaler = StandardScaler()
+        # scaler = StandardScaler()
+        scaler = Normalizer(norm='l2')
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test) 
         

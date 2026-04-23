@@ -99,7 +99,7 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-SHOTS = 20
+SHOTS = 10
 
 
 

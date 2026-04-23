@@ -59,6 +59,8 @@ def sanitize_filenames(directory):
 def split_dataset():
     # Create all target directories
     for d in[TRAIN_BASE_DIR, TRAIN_FORK_DIR, TRAIN_TRAIL_DIR, TEST_BASE_DIR, TEST_FORK_DIR, TEST_TRAIL_DIR]:
+        if os.path.exists(d):
+            shutil.rmtree(d)
         os.makedirs(d, exist_ok=True)
 
     # Dictionary to group files by image. Format:
@@ -270,7 +272,7 @@ CLASS_RENAME_MAP = {
 
 def rename_classes_in_files():
     print("Renaming files to clean up class names...")
-    files = glob.glob(os.path.join(SOURCE_DIR, '*.npy'))
+    files = sorted(glob.glob(os.path.join(SOURCE_DIR, '*.npy')))
     renamed_count = 0
     
     for filepath in files:
