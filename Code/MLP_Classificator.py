@@ -139,18 +139,29 @@ else:
 # 1. PyTorch Model and Center Loss Definitions
 # ==========================================
 
+class CosineLinear(nn.Module):
+    def __init__(self, in_features, out_features, scale=15.0):
+        super(CosineLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        nn.init.xavier_uniform_(self.weight)
+        self.scale = scale
+
+    def forward(self, input):
+        x_norm = F.normalize(input, p=2, dim=1)
+        w_norm = F.normalize(self.weight, p=2, dim=1)
+        return F.linear(x_norm, w_norm) * self.scale
+
 class MLP_PyTorch(nn.Module):
-    """
-    Replicates the scikit-learn MLP architecture:
-    Input -> Linear(512) -> ReLU -> Linear(256) -> ReLU -> Linear(num_classes)
-    """
     def __init__(self, input_dim, num_classes):
         super(MLP_PyTorch, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 256) # Reduced size
-        self.dropout1 = nn.Dropout(p=0.4)    # Added dropout
-        self.fc2 = nn.Linear(256, 128)       # Reduced size
-        self.dropout2 = nn.Dropout(p=0.4)    # Added dropout
-        self.fc3 = nn.Linear(128, num_classes)
+        self.fc1 = nn.Linear(input_dim, 256) 
+        self.dropout1 = nn.Dropout(p=0.4)    
+        self.fc2 = nn.Linear(256, 128)       
+        self.dropout2 = nn.Dropout(p=0.4)    
+        # Use Cosine Classifier instead of standard Linear
+        self.fc3 = CosineLinear(128, num_classes)
 
     def forward(self, x):
         h1 = F.relu(self.fc1(x))
@@ -158,7 +169,7 @@ class MLP_PyTorch(nn.Module):
         h2 = F.relu(self.fc2(h1))
         h2_drop = self.dropout2(h2)
         logits = self.fc3(h2_drop)
-        return logits, h2 # Still return pure h2 for metric distances
+        return logits, h2
     
 
 class FocalLoss(nn.Module):
