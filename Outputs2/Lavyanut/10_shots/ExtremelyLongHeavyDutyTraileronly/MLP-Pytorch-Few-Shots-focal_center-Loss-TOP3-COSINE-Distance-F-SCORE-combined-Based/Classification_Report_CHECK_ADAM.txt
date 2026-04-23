@@ -1,19 +1,19 @@
 Prediction Mode: Prototypes (COSINE)
 Loss Combination : FOCAL_CENTER
-Overall Validation Set Accuracy (Top-3): 89.63%
+Overall Validation Set Accuracy (Top-3): 90.33%
                                    precision    recall  f1-score   support
 
-                       Bulldozers     0.4348    0.6667    0.5263        15
-                CementMixerTrucks     0.6905    0.9355    0.7945        31
-ExtremelyLongHeavyDutyTraileronly     0.8462    0.7333    0.7857        30
-                        HeavyDuty     0.6222    0.9032    0.7368        31
-                    LongHeavyDuty     0.9390    0.9747    0.9565        79
-                      MediumSmall     0.8904    0.8784    0.8844        74
-                   MediumStandard     0.9554    0.8770    0.9145       244
-                            Other     0.6071    0.4857    0.5397        35
-                            Small     0.9826    0.9826    0.9826       288
-                     TruckTractor     0.8889    0.7742    0.8276        31
+                       Bulldozers     0.3333    0.6000    0.4286        15
+                CementMixerTrucks     0.7368    0.9032    0.8116        31
+ExtremelyLongHeavyDutyTraileronly     0.8182    0.9000    0.8571        30
+                        HeavyDuty     0.6977    0.9677    0.8108        31
+                    LongHeavyDuty     0.9512    0.9873    0.9689        79
+                      MediumSmall     0.9315    0.9189    0.9252        74
+                   MediumStandard     0.9680    0.8689    0.9158       244
+                            Other     0.6207    0.5143    0.5625        35
+                            Small     0.9792    0.9826    0.9809       288
+                     TruckTractor     0.8800    0.7097    0.7857        31
 
-                         accuracy                         0.8963       858
-                        macro avg     0.7857    0.8211    0.7949       858
-                     weighted avg     0.9063    0.8963    0.8982       858
+                         accuracy                         0.9033       858
+                        macro avg     0.7917    0.8353    0.8047       858
+                     weighted avg     0.9153    0.9033    0.9061       858

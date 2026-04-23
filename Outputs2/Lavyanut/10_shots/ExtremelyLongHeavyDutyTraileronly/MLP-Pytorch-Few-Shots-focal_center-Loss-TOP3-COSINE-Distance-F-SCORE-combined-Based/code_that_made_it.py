@@ -571,7 +571,7 @@ def main():
                     custom_metric = novel_f2
                 else:
                     # custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_f1) ### ADAM CHANGED - Concentrates on the f2 score and mean of f1 score for all of the classes
-                    custom_metric = (F2_NOVEL_RATIO * novel_f1) + (F1_ALL_RATIO * macro_base_f1)
+                    custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_base_f1)
 
                 
                 if custom_metric > best_val_metric:
