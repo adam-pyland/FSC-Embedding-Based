@@ -1,19 +1,19 @@
 Prediction Mode: Prototypes (COSINE)
 Loss Combination : FOCAL_CENTER
-Overall Validation Set Accuracy (Top-3): 90.91%
+Overall Validation Set Accuracy (Top-3): 90.68%
                                    precision    recall  f1-score   support
 
-                       Bulldozers     0.4000    0.6667    0.5000        15
-                CementMixerTrucks     0.6596    1.0000    0.7949        31
-ExtremelyLongHeavyDutyTraileronly     0.9600    0.8000    0.8727        30
-                        HeavyDuty     0.7436    0.9355    0.8286        31
-                    LongHeavyDuty     0.9286    0.9873    0.9571        79
-                      MediumSmall     0.9189    0.9189    0.9189        74
-                   MediumStandard     0.9638    0.8730    0.9161       244
-                            Other     0.6786    0.5429    0.6032        35
+                       Bulldozers     0.4167    0.6667    0.5128        15
+                CementMixerTrucks     0.6889    1.0000    0.8158        31
+ExtremelyLongHeavyDutyTraileronly     0.9231    0.8000    0.8571        30
+                        HeavyDuty     0.7632    0.9355    0.8406        31
+                    LongHeavyDuty     0.9277    0.9747    0.9506        79
+                      MediumSmall     0.9178    0.9054    0.9116        74
+                   MediumStandard     0.9596    0.8770    0.9165       244
+                            Other     0.6129    0.5429    0.5758        35
                             Small     0.9759    0.9861    0.9810       288
-                     TruckTractor     1.0000    0.7742    0.8727        31
+                     TruckTractor     0.9583    0.7419    0.8364        31
 
-                         accuracy                         0.9091       858
-                        macro avg     0.8229    0.8485    0.8245       858
-                     weighted avg     0.9215    0.9091    0.9112       858
+                         accuracy                         0.9068       858
+                        macro avg     0.8144    0.8430    0.8198       858
+                     weighted avg     0.9167    0.9068    0.9086       858

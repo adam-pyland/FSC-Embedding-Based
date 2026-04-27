@@ -55,7 +55,7 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
 
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
 

@@ -74,17 +74,17 @@ LOSS_COMBINATION = 'focal_center'
 CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
 
-# BEST_HYPERPARAMETERS=None
+BEST_HYPERPARAMETERS=None
 
-BEST_HYPERPARAMETERS = {
-    "batch_size": 256,
-    "gamma": 1.3056901954219682,
-    "center_weight": 0.01836520533009293,
-    "lr": 0.0012824442659618756,
-    "weight_decay": 0.00011775557151085135,
-    "weight_smoothing": 0.3462141540802811,
-    "novel_multiplier": 5.310693283800326
-}
+# BEST_HYPERPARAMETERS = {
+#     "batch_size": 256,
+#     "gamma": 1.3056901954219682,
+#     "center_weight": 0.01836520533009293,
+#     "lr": 0.0012824442659618756,
+#     "weight_decay": 0.00011775557151085135,
+#     "weight_smoothing": 0.3462141540802811,
+#     "novel_multiplier": 5.310693283800326
+# }
 
 
 MAX_EPOCHS = 500
@@ -115,9 +115,9 @@ SHOTS = 20
 
 
 
-SAVE_DIR = f"models2/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs2/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -476,14 +476,59 @@ def main():
         train_dataset = TensorDataset(torch.FloatTensor(X_tr), torch.LongTensor(y_tr))
         val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
         
-        # Base Raw Class weights
+        # Base Raw Class weights for final training
         print("\nCalculating Base Class Weights...")
         raw_class_weights = compute_class_weight('balanced', classes=np.unique(y_train_encoded), y=y_train_encoded)
 
         # ==============================================================
-        # OPTUNA HYPERPARAMETER SEARCH
+        # OPTUNA HYPERPARAMETER SEARCH (META "LEAVE-ONE-OUT" STRATEGY)
         # ==============================================================
         novel_class_idx = le.transform([TARGET_NOVEL_CLASS])[0]
+        
+        # 1. Identify pure base classes (exclude the real novel class entirely)
+        base_class_indices = [idx for idx in range(num_classes) if idx != novel_class_idx]
+        
+        # 2. Randomly select 3 Base classes to act as our "Simulated 5-shot Novel Classes"
+        simulated_novel_indices = np.random.choice(base_class_indices, size=3, replace=False)
+        print(f"\n--- Setting up Meta-Optuna Few-Shot Simulation ---")
+        print(f"Hiding real novel class: {TARGET_NOVEL_CLASS}")
+        print(f"Simulating K-shot learning on base classes: {le.inverse_transform(simulated_novel_indices)}")
+
+        # 3. Create the Meta-Training Dataset
+        X_meta_tr_list, y_meta_tr_list = [], []
+        for cls_idx in range(num_classes):
+            if cls_idx == novel_class_idx:
+                continue # Skip the real novel class
+                
+            cls_mask = (y_tr == cls_idx)
+            X_cls = X_tr[cls_mask]
+            y_cls = y_tr[cls_mask]
+            
+            if cls_idx in simulated_novel_indices:
+                # DOWNSAMPLE THESE 3 CLASSES TO EXACTLY 'SHOTS' (e.g., 5)
+                selected_indices = np.random.choice(len(X_cls), min(SHOTS, len(X_cls)), replace=False)
+                X_meta_tr_list.append(X_cls[selected_indices])
+                y_meta_tr_list.append(y_cls[selected_indices])
+            else:
+                # Keep full data for the rest of the base classes
+                X_meta_tr_list.append(X_cls)
+                y_meta_tr_list.append(y_cls)
+                
+        X_meta_tr = np.vstack(X_meta_tr_list)
+        y_meta_tr = np.concatenate(y_meta_tr_list)
+        meta_train_dataset = TensorDataset(torch.FloatTensor(X_meta_tr), torch.LongTensor(y_meta_tr))
+        
+        # 4. Create Meta-Validation Dataset (Exclude real novel class, keep full val set for simulated ones)
+        val_base_mask = (y_val != novel_class_idx)
+        meta_val_dataset = TensorDataset(torch.FloatTensor(X_val[val_base_mask]), torch.LongTensor(y_val[val_base_mask]))
+
+        # 5. Calculate class weights for the simulated setup
+        meta_raw_class_weights = compute_class_weight('balanced', classes=np.unique(y_meta_tr), y=y_meta_tr)
+        full_meta_raw_weights = np.ones(num_classes) # Fill a full array to match model output dimension
+        for i, cls_idx in enumerate(np.unique(y_meta_tr)):
+            full_meta_raw_weights[cls_idx] = meta_raw_class_weights[i]
+
+
         def objective(trial):
             batch_size = trial.suggest_categorical('batch_size',[256, 512, 1024, 2048, 4096])
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
@@ -491,26 +536,27 @@ def main():
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
-
             novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
 
-            smoothed_weights = np.power(raw_class_weights, weight_smoothing)
-            smoothed_weights[novel_class_idx] *= novel_multiplier
+            # Apply multiplier to the 3 SIMULATED novel classes
+            smoothed_weights = np.power(full_meta_raw_weights, weight_smoothing)
+            for sim_idx in simulated_novel_indices:
+                smoothed_weights[sim_idx] *= novel_multiplier
             class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
             trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
             criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
             criterion_center = CenterLoss(num_classes=num_classes, feat_dim=128, device=device)
             
-            # Setup Miner and Triplet margin loss dynamically
             miner = pml_miners.BatchHardMiner(distance=pml_dist)
             criterion_triplet = pml_losses.TripletMarginLoss(margin=triplet_margin, distance=pml_dist)
 
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
             optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            # USE META DATASETS FOR SEARCH
+            train_loader = DataLoader(meta_train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = DataLoader(meta_val_dataset, batch_size=batch_size, shuffle=False)
 
             best_val_metric = -1.0 
             epochs_no_improve = 0
@@ -568,22 +614,22 @@ def main():
                         all_labels.extend(labels.cpu().numpy())
                 
                 f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, labels=np.arange(num_classes), zero_division=0)
-                novel_f2 = f2_scores[novel_class_idx]
-
                 f1_scores = f1_score(all_labels, all_preds, average=None, labels=np.arange(num_classes), zero_division=0)
-                macro_f1 = np.mean(f1_scores)
-                novel_f1 = f1_scores[novel_class_idx]
+                
+                # Average scores over the 3 SIMULATED novel classes
+                simulated_novel_f2 = np.mean([f2_scores[i] for i in simulated_novel_indices])
+                simulated_novel_f1 = np.mean([f1_scores[i] for i in simulated_novel_indices])
 
-                base_classes_mask = np.arange(num_classes) != novel_class_idx
-                macro_base_f1 = np.mean(f1_scores[base_classes_mask])
+                # Calculate base F1 over the PURE base classes (excluding the simulated ones)
+                pure_base_indices = [i for i in base_class_indices if i not in simulated_novel_indices]
+                macro_base_f1 = np.mean([f1_scores[i] for i in pure_base_indices])
                 
                 if CUSTOM_METRIC_TYPE == 'f1_novel':
-                    custom_metric = novel_f1
+                    custom_metric = simulated_novel_f1
                 elif CUSTOM_METRIC_TYPE == 'f2_novel':
-                    custom_metric = novel_f2
+                    custom_metric = simulated_novel_f2
                 else:
-                    # custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_f1) ### ADAM CHANGED - Concentrates on the f2 score and mean of f1 score for all of the classes
-                    custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_base_f1)
+                    custom_metric = (F2_NOVEL_RATIO * simulated_novel_f2) + (F1_ALL_RATIO * macro_base_f1)
 
                 
                 if custom_metric > best_val_metric:

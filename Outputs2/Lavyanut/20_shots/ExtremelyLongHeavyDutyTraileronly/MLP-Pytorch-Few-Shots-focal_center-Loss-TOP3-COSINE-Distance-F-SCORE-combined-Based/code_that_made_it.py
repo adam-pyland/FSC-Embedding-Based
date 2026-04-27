@@ -55,7 +55,7 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
 
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
 
@@ -620,6 +620,9 @@ def main():
             file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
             with open(file_path, 'w') as f:
                 json.dump(best_params, f, indent=4)
+        elif not os.path.exists(file_path) and BEST_HYPERPARAMETERS:
+            with open(file_path, 'w') as f:
+                json.dump(BEST_HYPERPARAMETERS, f, indent=4)
 
         # ==============================================================
         # FINAL FULL TRAINING WITH BEST HYPERPARAMETERS
