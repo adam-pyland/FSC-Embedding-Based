@@ -77,13 +77,13 @@ SEED = 9
 # BEST_HYPERPARAMETERS=None
 
 BEST_HYPERPARAMETERS = {
-    "batch_size": 1024,
-    "gamma": 2.580627947590925,
-    "center_weight": 0.028365290137279026,
-    "lr": 0.004351134823645674,
-    "weight_decay": 0.003054107429563069,
-    "weight_smoothing": 0.5503699400128665,
-    "novel_multiplier": 9.498785088342668
+    "batch_size": 256,
+    "gamma": 2.8475373439781944,
+    "center_weight": 0.00879200064948808,
+    "lr": 0.004814791321308304,
+    "weight_decay": 0.001849482069081767,
+    "weight_smoothing": 0.20354491513432654,
+    "novel_multiplier": 2.703450114030043
 }
 
 
@@ -111,7 +111,7 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-SHOTS = 5
+SHOTS = 10
 
 
 
