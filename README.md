@@ -13,7 +13,11 @@
 # Adam's Code:
 ```text
 Check_Separability_of_Novel_Base_Classes.py
-    - Trains logistinc Regression from the embeddings feature vectors.
+    - Trains MLP on FAIR1M.
+MLP_Classificator.py
+    - Trains MLP on Lavyanut dataset and gets the best Generalized performance.
+MLP_Classificator_SHOW_ONE_EXAMPLE.py
+    - Shows all of the graphs for only one test sample to show the full Flow of this process.
 Detecton_with_SAHI.py
     - Detect Objects with Tiles
 Detector.py
@@ -63,3 +67,5 @@ The FAIR1M dataset is on the Boston Server:
 ```
 /Data/Projects/Satellite/data/FAIR1M
 ```
+
+
