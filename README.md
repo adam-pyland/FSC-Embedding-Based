@@ -18,8 +18,10 @@ MLP_Classificator.py
     - Trains MLP on Lavyanut dataset and gets the best Generalized performance.
 MLP_Classificator_SHOW_ONE_EXAMPLE.py
     - Shows all of the graphs for only one test sample to show the full Flow of this process.
+MLP_TOP_K_Classification.py
+    - Classifies using pretrained model the predicted test samples into TOP1, TOP2 and TOP3 groups.
 Detecton_with_SAHI.py
-    - Detect Objects with Tiles
+    - Detect Objects with Tiles.
 Detector.py
     - Detection, Manual Tiling.
 Detector_Evaluation.py

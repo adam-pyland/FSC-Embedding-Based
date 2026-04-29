@@ -25,13 +25,15 @@ TARGET_EVAL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 
 Dataset_Name = 'Lavyanut'
 
+SHOTS = 20
+
 # Path to the directory where the MLP model, scaler, and label encoder are saved
 LOSS_COMBINATION = 'focal_center'
-SAVED_MODEL_DIR = f"models/{Dataset_Name}/{TARGET_EVAL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVED_MODEL_DIR = f"models_Generalized_Windows/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
 
 # Output directory for the text files
-OUTPUT_DIR = f"Outputs/{Dataset_Name}/{TARGET_EVAL_CLASS}/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
+OUTPUT_DIR = f"Outputs_Generalized_Windows/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
@@ -48,20 +50,27 @@ ALL_CLASSES = [
 'Small',
 'TruckTractor'
 ]
+
+WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
+data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
+if WORK_PLACE == 'WSL':
+    data_path = '/mnt/c/Adams/FSOD/Data/Lavyanut/Lavyanut'
+
+
 SAFE_CLASS_NAMES =[cls.replace(" ", "_") for cls in ALL_CLASSES]
 
 # Directories (Change these if they differ from your environment)
-TRAIN_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/base_class/'
-VAL_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/base_class/'
+TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
+VAL_BASE_DIR  = f'{data_path}/Obj_Embs/test/base_class/'
 
 if TARGET_EVAL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
-    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/trailer_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer/'
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_trailer_{SHOTS}_shots/'
 elif TARGET_EVAL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
-    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/forklifts_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_forklifts/'
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklifts_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklifts_{SHOTS}_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
 
@@ -72,17 +81,25 @@ else:
 # ==========================================
 
 class MLP_PyTorch(nn.Module):
+    """
+    Replicates the scikit-learn MLP architecture:
+    Input -> Linear(512) -> ReLU -> Linear(256) -> ReLU -> Linear(num_classes)
+    """
     def __init__(self, input_dim, num_classes):
         super(MLP_PyTorch, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 512)
-        self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, num_classes)
+        self.fc1 = nn.Linear(input_dim, 256) # Reduced size
+        self.dropout1 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc2 = nn.Linear(256, 128)       # Reduced size
+        self.dropout2 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc3 = nn.Linear(128, num_classes)
 
     def forward(self, x):
         h1 = F.relu(self.fc1(x))
+        h1 = self.dropout1(h1)
         h2 = F.relu(self.fc2(h1))
-        logits = self.fc3(h2)
-        return logits, h2
+        h2_drop = self.dropout2(h2)
+        logits = self.fc3(h2_drop)
+        return logits, h2 # Still return pure h2 for metric distances
     
 # ==========================================
 # 2. Evaluation Helpers
@@ -91,7 +108,7 @@ class MLP_PyTorch(nn.Module):
 def compute_train_centers(model, dataloader, num_classes, device):
     """Calculates prototype centers required for 'cosine' or 'l2' metrics."""
     model.eval()
-    centers = torch.zeros(num_classes, 256).to(device)
+    centers = torch.zeros(num_classes, 128).to(device)
     counts = torch.zeros(num_classes).to(device)
     
     with torch.no_grad():

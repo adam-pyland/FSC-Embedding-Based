@@ -4,11 +4,16 @@ ultralytics/
 # Environments
 venv310/
 venv/
+wslvenv/
 # Data
 Input_Images/
 Original_Code_Results/
 Results_with_SAHI/
 models/
+**/models_Generalized/
+**/models_Generalized_WSL/
+**/models_Generalized_Windows/
+**/models_Searched_on_Each_Class/
 runs/
 
 Outputs/FAIR1M_Tiles_SAHI_17_2_26/
