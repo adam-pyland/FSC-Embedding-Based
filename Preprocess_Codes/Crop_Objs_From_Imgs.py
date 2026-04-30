@@ -229,8 +229,8 @@ def crop_objects_from_FAIR1M_xml_obb():
 
 def crop_objects_from_Lavyanut_txt_obb():
     # --- CHANGED: Renamed directory variables to match TXT processing ---
-    txt_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/new_gt/'
-    img_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/images/'
+    txt_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/labels'
+    img_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/images'
     
     # --- CHANGED: Unified output directory since new base/novel splits weren't provided ---
     out_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops/'
@@ -342,7 +342,7 @@ def crop_objects_from_Lavyanut_txt_obb():
 
 
 if __name__ == "__main__":
-    # copy_imgs_by_txt_list()
+    copy_imgs_by_txt_list()
     # crop_objects_from_xml()
     # crop_objects_from_FAIR1M_xml_obb()
     crop_objects_from_Lavyanut_txt_obb()

@@ -3,9 +3,10 @@ import glob
 import re
 import shutil
 import random
+from collections import Counter
 
 # ================= Paths & Settings =================
-SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/"
+SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/labels"
 BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/"
 
 # The number of images to be used from the few shots novel class.
@@ -31,29 +32,44 @@ EXCLUDED_CLASSES =["ExtremelyLongHeavyDuty", "HeavyDutyTractorTruck", "MobileCra
 
 random.seed(42) # For reproducible splits
 
-# ================= 1. Sanitization Function =================
+import os
+import re
+
 def sanitize_filenames(directory):
-    """
-    Removes spaces, commas, and hyphens from all NPY filenames in the directory
-    so it becomes a continuous string separated only by underscores.
-    """
-    print("Sanitizing filenames...")
-    files = glob.glob(os.path.join(directory, '*.npy'))
+    
+    # 2. Check if the directory even exists
+    if not os.path.exists(directory):
+        print("ERROR: That directory does not exist! Please check your path.")
+        return
+
+    # 3. Get ALL files in that folder
+    all_items = os.listdir(directory)
+    print(f"Found {len(all_items)} total items in this folder.")
     
     renamed_count = 0
-    for filepath in files:
-        dirname, filename = os.path.split(filepath)
+    
+    for filename in all_items:
+        # 4. Only process specific file types (ignoring folders or hidden files)
+        if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.npy', '.txt')):
+            continue
+            
+        filepath = os.path.join(directory, filename)
         name, ext = os.path.splitext(filename)
         
-        # Remove spaces, commas, and hyphens
-        sanitized_name = re.sub(r'[ ,]', '_', name)
+        # Replace spaces, commas, and hyphens with an underscore
+        sanitized_name = re.sub(r'[ ,\-]', '_', name)
         
-        new_filepath = os.path.join(dirname, sanitized_name + ext)
+        # Replace multiple adjacent underscores with a single underscore
+        sanitized_name = re.sub(r'_+', '_', sanitized_name) 
+        
+        new_filepath = os.path.join(directory, sanitized_name + ext)
+        
         if filepath != new_filepath:
             os.rename(filepath, new_filepath)
             renamed_count += 1
             
-    print(f"Sanitized {renamed_count} files.\n")
+    print(f"Successfully sanitized {renamed_count} files.\n")
+
 
 # ================= 2. Split Function =================
 def split_dataset():
@@ -251,7 +267,6 @@ def print_actual_class_names(directory):
         print(cls)
 
 
-SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/"
 
 # Exact mapping from the old problematic names to the clean continuous names
 CLASS_RENAME_MAP = {
@@ -299,7 +314,67 @@ def rename_classes_in_files():
 
     print(f"Successfully renamed {renamed_count} files!")
 
+
+def find_mismatched_labels(label_dir, image_dir):
+    # Get sets of filenames without their extensions
+    labels = {os.path.splitext(f)[0] for f in os.listdir(label_dir)}
+    images = {os.path.splitext(f)[0] for f in os.listdir(image_dir)}
+
+    # Find labels that exist in the labels set but not the images set
+    mismatched = labels - images
+
+    if mismatched:
+        print(f"Found {len(mismatched)} orphan labels:")
+        for name in sorted(mismatched):
+            print(name)
+    else:
+        print("No mismatched labels found.")
+
+
+def count_crop_classes(crops_dir, output_txt_path):
+    # Use a Counter to automatically tally up class names
+    class_counts = Counter()
+    
+    # Get all files in the directory
+    files = glob.glob(os.path.join(crops_dir, '*.*'))
+    
+    valid_extensions = {'.jpg', '.jpeg', '.png'}
+    
+    for filepath in files:
+        filename = os.path.basename(filepath)
+        name, ext = os.path.splitext(filename)
+        
+        # Only process image files
+        if ext.lower() not in valid_extensions:
+            continue
+            
+        # Split the filename by underscores
+        parts = name.split('_')
+        
+        # Assuming format: ..._04.2024_MediumSmall_1710
+        # The class name is the second-to-last part (index -2)
+        if len(parts) >= 2:
+            class_name = parts[-2]
+            class_counts[class_name] += 1
+            
+    # Save the tallies to a text file
+    with open(output_txt_path, 'w') as f:
+        f.write("Dataset Class Counts:\n")
+        f.write("-" * 25 + "\n")
+        
+        # .most_common() orders them from highest count to lowest count
+        for cls_name, count in class_counts.most_common():
+            f.write(f"{cls_name}: {count}\n")
+            
+    print(f"Successfully counted {sum(class_counts.values())} objects across {len(class_counts)} classes.")
+    print(f"Results saved to: {output_txt_path}")
+
 if __name__ == "__main__":
+    # label_path = "/home/adamm/Documents/FSOD/Data/Lavyanut/labels"
+    # image_path = "/home/adamm/Documents/FSOD/Data/Lavyanut/images"
+
+    # Run the function
+    # find_mismatched_labels(label_path, image_path)
     # sanitize_filenames(SOURCE_DIR)
     # rename_classes_in_files()
     # print_actual_class_names(TRAIN_BASE_DIR)
@@ -308,4 +383,9 @@ if __name__ == "__main__":
     # print_actual_class_names(TEST_BASE_DIR)
     # print_actual_class_names(TEST_FORK_DIR)
     # print_actual_class_names(TEST_TRAIL_DIR)
-    split_dataset()
+
+    crops_directory = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops/"
+    output_file = "/home/adamm/Documents/FSOD/Data/Lavyanut/class_counts.txt"
+
+    count_crop_classes(crops_directory, output_file)
+    # split_dataset()
