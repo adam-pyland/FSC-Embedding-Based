@@ -55,14 +55,14 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
 
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
 if WORK_PLACE == 'WSL':
     data_path = '/mnt/c/Adams/FSOD/Data/Lavyanut/Lavyanut'
 # Top-K Metrics
-USE_TOP_K_METRICS = False
-TOP_K_VALUE = 1
+USE_TOP_K_METRICS = True
+TOP_K_VALUE = 3
 
 # Prediction & Distance Metrics
 # Options: 'l2' (Euclidean), 'cosine' (Cosine similarity), or 'logits' (MLP Output Scores)
@@ -99,6 +99,7 @@ ALL_CLASSES = [
 'Bulldozers',
 'CementMixerTrucks',
 'ExtremelyLongHeavyDutyTraileronly',
+'ExtremelyLongHeavyDuty',
 'Forklifts',
 'HeavyDuty',
 'LongHeavyDuty',
@@ -118,9 +119,9 @@ Dataset_Name = 'Lavyanut'
 
 
 
-SAVE_DIR = f"models_Generalized_Windows/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs_Generalized_Windows/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -128,12 +129,19 @@ VAL_BASE_DIR  = f'{data_path}/Obj_Embs/test/base_class/'
 
 if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
+    ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
     VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_trailer_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
+    ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklifts_{SHOTS}_shots/'
     VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklifts_{SHOTS}_shots/'
+elif TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDuty':
+    ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
+    ALL_CLASSES.remove('Forklifts')
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/heavyduty_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_heavyduty_{SHOTS}_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
 

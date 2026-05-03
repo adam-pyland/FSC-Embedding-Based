@@ -14,6 +14,7 @@ models/
 **/models_Generalized_WSL/
 **/models_Generalized_Windows/
 **/models_Searched_on_Each_Class/
+Models_old_Dataset/
 runs/
 
 Outputs/FAIR1M_Tiles_SAHI_17_2_26/
@@ -25,6 +26,8 @@ Outputs/YOLO26_Train_FAIR1M/
 TEMP.py
 .vscode/
 Outputs/Test_YOLOn_TrOn_FAIR1M_On_DOTA/
+Outputs_Old_Dataset/Outputs
+
 
 # Type of files
 *.jpg

@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import optuna
 
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler, LabelEncoder, Normalizer
 from sklearn.decomposition import KernelPCA
 from sklearn.manifold import TSNE, MDS
 from sklearn.metrics import classification_report, f1_score, fbeta_score
@@ -55,6 +55,11 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
+
+data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
+if WORK_PLACE == 'WSL':
+    data_path = '/mnt/c/Adams/FSOD/Data/Lavyanut/Lavyanut'
 # Top-K Metrics
 USE_TOP_K_METRICS = True
 TOP_K_VALUE = 3
@@ -68,7 +73,21 @@ DISTANCE_METRIC = 'cosine'
 LOSS_COMBINATION = 'focal_center'
 
 CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
+SEED = 9
 
+SHOTS = 20
+
+BEST_HYPERPARAMETERS=None
+
+# BEST_HYPERPARAMETERS = {
+#     "batch_size": 1024,
+#     "gamma": 2.580627947590925,
+#     "center_weight": 0.028365290137279026,
+#     "lr": 0.004351134823645674,
+#     "weight_decay": 0.003054107429563069,
+#     "weight_smoothing": 0.5503699400128665,
+#     "novel_multiplier": 9.498785088342668
+# }
 
 
 MAX_EPOCHS = 500
@@ -80,6 +99,7 @@ ALL_CLASSES = [
 'Bulldozers',
 'CementMixerTrucks',
 'ExtremelyLongHeavyDutyTraileronly',
+'ExtremelyLongHeavyDuty',
 'Forklifts',
 'HeavyDuty',
 'LongHeavyDuty',
@@ -95,22 +115,33 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-SAVE_DIR = f"models/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs/{Dataset_Name}/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+
+
+
+SAVE_DIR = f"models/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+
+PLOT_DIR = f"Outputs/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
-TRAIN_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/base_class/'
-VAL_BASE_DIR  = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/base_class/'
+TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
+VAL_BASE_DIR  = f'{data_path}/Obj_Embs/test/base_class/'
 
 if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
-    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/trailer_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_trailer/'
+    ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_trailer_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
-    TRAIN_NOVEL_DIR = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/train/forklifts_few_shots/'
-    VAL_NOVEL_DIR   = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/test/novel_class_forklifts/'
+    ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklifts_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklifts_{SHOTS}_shots/'
+elif TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDuty':
+    ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
+    ALL_CLASSES.remove('Forklifts')
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/heavyduty_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_heavyduty_{SHOTS}_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
 
@@ -126,15 +157,19 @@ class MLP_PyTorch(nn.Module):
     """
     def __init__(self, input_dim, num_classes):
         super(MLP_PyTorch, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 512)
-        self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, num_classes)
+        self.fc1 = nn.Linear(input_dim, 256) # Reduced size
+        self.dropout1 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc2 = nn.Linear(256, 128)       # Reduced size
+        self.dropout2 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc3 = nn.Linear(128, num_classes)
 
     def forward(self, x):
         h1 = F.relu(self.fc1(x))
+        h1 = self.dropout1(h1)
         h2 = F.relu(self.fc2(h1))
-        logits = self.fc3(h2)
-        return logits, h2  # Returning h2 to extract the 256-D features easily
+        h2_drop = self.dropout2(h2)
+        logits = self.fc3(h2_drop)
+        return logits, h2 # Still return pure h2 for metric distances
     
 
 class FocalLoss(nn.Module):
@@ -202,7 +237,7 @@ def compute_train_centers(model, dataloader, num_classes, device):
     for each class in the 256-D space.
     """
     model.eval()
-    centers = torch.zeros(num_classes, 256).to(device)
+    centers = torch.zeros(num_classes, 128).to(device)
     counts = torch.zeros(num_classes).to(device)
     
     with torch.no_grad():
@@ -336,7 +371,7 @@ def evaluate_and_visualize_superclasses(y_test, y_pred, X_viz, y_test_viz, cente
 # ==========================================
 
 def main():
-    seed_everything(8)
+    seed_everything(SEED)
     # 0. Save a copy of the executing script to ensure reproducibility
     try:
         current_script = os.path.abspath(__file__)
@@ -370,7 +405,7 @@ def main():
             print(f"Warning: Directory does not exist -> {directory}")
             return
             
-        files = glob.glob(os.path.join(directory, '*.npy'))
+        files = sorted(glob.glob(os.path.join(directory, '*.npy'))) 
         for f in files:
             filename = os.path.basename(f)
             for cls in all_classes:
@@ -437,7 +472,8 @@ def main():
         X_train_scaled = scaler.fit_transform(X_train)
     else:
         print("\nNo saved model found. Preparing for Training...")
-        scaler = StandardScaler()
+        # scaler = StandardScaler()
+        scaler = Normalizer(norm='l2')
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test) 
         
@@ -451,14 +487,59 @@ def main():
         train_dataset = TensorDataset(torch.FloatTensor(X_tr), torch.LongTensor(y_tr))
         val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.LongTensor(y_val))
         
-        # Base Raw Class weights
+        # Base Raw Class weights for final training
         print("\nCalculating Base Class Weights...")
         raw_class_weights = compute_class_weight('balanced', classes=np.unique(y_train_encoded), y=y_train_encoded)
 
         # ==============================================================
-        # OPTUNA HYPERPARAMETER SEARCH
+        # OPTUNA HYPERPARAMETER SEARCH (META "LEAVE-ONE-OUT" STRATEGY)
         # ==============================================================
         novel_class_idx = le.transform([TARGET_NOVEL_CLASS])[0]
+        
+        # 1. Identify pure base classes (exclude the real novel class entirely)
+        base_class_indices = [idx for idx in range(num_classes) if idx != novel_class_idx]
+        
+        # 2. Randomly select 3 Base classes to act as our "Simulated 5-shot Novel Classes"
+        simulated_novel_indices = np.random.choice(base_class_indices, size=3, replace=False)
+        print(f"\n--- Setting up Meta-Optuna Few-Shot Simulation ---")
+        print(f"Hiding real novel class: {TARGET_NOVEL_CLASS}")
+        print(f"Simulating K-shot learning on base classes: {le.inverse_transform(simulated_novel_indices)}")
+
+        # 3. Create the Meta-Training Dataset
+        X_meta_tr_list, y_meta_tr_list = [], []
+        for cls_idx in range(num_classes):
+            if cls_idx == novel_class_idx:
+                continue # Skip the real novel class
+                
+            cls_mask = (y_tr == cls_idx)
+            X_cls = X_tr[cls_mask]
+            y_cls = y_tr[cls_mask]
+            
+            if cls_idx in simulated_novel_indices:
+                # DOWNSAMPLE THESE 3 CLASSES TO EXACTLY 'SHOTS' (e.g., 5)
+                selected_indices = np.random.choice(len(X_cls), min(SHOTS, len(X_cls)), replace=False)
+                X_meta_tr_list.append(X_cls[selected_indices])
+                y_meta_tr_list.append(y_cls[selected_indices])
+            else:
+                # Keep full data for the rest of the base classes
+                X_meta_tr_list.append(X_cls)
+                y_meta_tr_list.append(y_cls)
+                
+        X_meta_tr = np.vstack(X_meta_tr_list)
+        y_meta_tr = np.concatenate(y_meta_tr_list)
+        meta_train_dataset = TensorDataset(torch.FloatTensor(X_meta_tr), torch.LongTensor(y_meta_tr))
+        
+        # 4. Create Meta-Validation Dataset (Exclude real novel class, keep full val set for simulated ones)
+        val_base_mask = (y_val != novel_class_idx)
+        meta_val_dataset = TensorDataset(torch.FloatTensor(X_val[val_base_mask]), torch.LongTensor(y_val[val_base_mask]))
+
+        # 5. Calculate class weights for the simulated setup
+        meta_raw_class_weights = compute_class_weight('balanced', classes=np.unique(y_meta_tr), y=y_meta_tr)
+        full_meta_raw_weights = np.ones(num_classes) # Fill a full array to match model output dimension
+        for i, cls_idx in enumerate(np.unique(y_meta_tr)):
+            full_meta_raw_weights[cls_idx] = meta_raw_class_weights[i]
+
+
         def objective(trial):
             batch_size = trial.suggest_categorical('batch_size',[256, 512, 1024, 2048, 4096])
             gamma = trial.suggest_float('gamma', 0.5, 3.0)
@@ -466,26 +547,27 @@ def main():
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
-
             novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
 
-            smoothed_weights = np.power(raw_class_weights, weight_smoothing)
-            smoothed_weights[novel_class_idx] *= novel_multiplier
+            # Apply multiplier to the 3 SIMULATED novel classes
+            smoothed_weights = np.power(full_meta_raw_weights, weight_smoothing)
+            for sim_idx in simulated_novel_indices:
+                smoothed_weights[sim_idx] *= novel_multiplier
             class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
             trial_model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
             criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=gamma).to(device)
-            criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
+            criterion_center = CenterLoss(num_classes=num_classes, feat_dim=128, device=device)
             
-            # Setup Miner and Triplet margin loss dynamically
             miner = pml_miners.BatchHardMiner(distance=pml_dist)
             criterion_triplet = pml_losses.TripletMarginLoss(margin=triplet_margin, distance=pml_dist)
 
             optimizer = optim.Adam(trial_model.parameters(), lr=lr, weight_decay=weight_decay)
             optimizer_center = optim.SGD(criterion_center.parameters(), lr=0.5)
 
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            # USE META DATASETS FOR SEARCH
+            train_loader = DataLoader(meta_train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = DataLoader(meta_val_dataset, batch_size=batch_size, shuffle=False)
 
             best_val_metric = -1.0 
             epochs_no_improve = 0
@@ -543,22 +625,22 @@ def main():
                         all_labels.extend(labels.cpu().numpy())
                 
                 f2_scores = fbeta_score(all_labels, all_preds, beta=2, average=None, labels=np.arange(num_classes), zero_division=0)
-                novel_f2 = f2_scores[novel_class_idx]
-
                 f1_scores = f1_score(all_labels, all_preds, average=None, labels=np.arange(num_classes), zero_division=0)
-                macro_f1 = np.mean(f1_scores)
-                novel_f1 = f1_scores[novel_class_idx]
+                
+                # Average scores over the 3 SIMULATED novel classes
+                simulated_novel_f2 = np.mean([f2_scores[i] for i in simulated_novel_indices])
+                simulated_novel_f1 = np.mean([f1_scores[i] for i in simulated_novel_indices])
 
-                base_classes_mask = np.arange(num_classes) != novel_class_idx
-                macro_base_f1 = np.mean(f1_scores[base_classes_mask])
+                # Calculate base F1 over the PURE base classes (excluding the simulated ones)
+                pure_base_indices = [i for i in base_class_indices if i not in simulated_novel_indices]
+                macro_base_f1 = np.mean([f1_scores[i] for i in pure_base_indices])
                 
                 if CUSTOM_METRIC_TYPE == 'f1_novel':
-                    custom_metric = novel_f1
+                    custom_metric = simulated_novel_f1
                 elif CUSTOM_METRIC_TYPE == 'f2_novel':
-                    custom_metric = novel_f2
+                    custom_metric = simulated_novel_f2
                 else:
-                    # custom_metric = (F2_NOVEL_RATIO * novel_f2) + (F1_ALL_RATIO * macro_f1) ### ADAM CHANGED - Concentrates on the f2 score and mean of f1 score for all of the classes
-                    custom_metric = (F2_NOVEL_RATIO * novel_f1) + (F1_ALL_RATIO * macro_base_f1)
+                    custom_metric = (F2_NOVEL_RATIO * simulated_novel_f2) + (F1_ALL_RATIO * macro_base_f1)
 
                 
                 if custom_metric > best_val_metric:
@@ -577,12 +659,13 @@ def main():
             return best_val_metric
 
         file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
-        if not os.path.exists(file_path):
+        if not os.path.exists(file_path) and not BEST_HYPERPARAMETERS:
             print("\n" + "="*50)
             print("Starting Optuna Hyperparameter Search (25 Trials)...")
             print("="*50)
+            sampler = optuna.samplers.TPESampler(seed=SEED) 
             pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
-            study = optuna.create_study(direction='maximize', pruner=pruner)
+            study = optuna.create_study(direction='maximize', pruner=pruner, sampler=sampler)
             study.optimize(objective, n_trials=25)
 
             print("\n" + "="*50)
@@ -594,16 +677,24 @@ def main():
             file_path = os.path.join(PLOT_DIR, 'Best_Hyparameters.json')
             with open(file_path, 'w') as f:
                 json.dump(best_params, f, indent=4)
+        elif not os.path.exists(file_path) and BEST_HYPERPARAMETERS:
+            with open(file_path, 'w') as f:
+                json.dump(BEST_HYPERPARAMETERS, f, indent=4)
 
         # ==============================================================
         # FINAL FULL TRAINING WITH BEST HYPERPARAMETERS
         # ==============================================================
         print("Training Final Model with Best Hyperparameters...")
+        seed_everything(SEED)
         if os.path.exists(file_path):
             with open(file_path, 'r') as f:
                 best_params = json.load(f)
                 print("+"*30)
                 print(f"Found parameter: {best_params}")
+        else:
+            best_params = BEST_HYPERPARAMETERS
+            print("+"*30)
+            print(f"Found parameter: {best_params}")
         
         final_batch_size = best_params.get('batch_size', 2048)
         train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
@@ -615,7 +706,7 @@ def main():
         class_weights_tensor = torch.FloatTensor(smoothed_weights).to(device)
 
         criterion_focal = FocalLoss(weight=class_weights_tensor, gamma=best_params['gamma']).to(device)
-        criterion_center = CenterLoss(num_classes=num_classes, feat_dim=256, device=device)
+        criterion_center = CenterLoss(num_classes=num_classes, feat_dim=128, device=device)
         final_center_weight = best_params['center_weight']
 
         miner = pml_miners.BatchHardMiner(distance=pml_dist)
