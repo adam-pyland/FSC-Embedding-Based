@@ -72,7 +72,7 @@ DISTANCE_METRIC = 'cosine'
 # Options: 'focal_center', 'triplet_center', 'focal_triplet_center'
 LOSS_COMBINATION = 'focal_center'
 
-CUSTOM_METRIC_TYPE = 'f2_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
+CUSTOM_METRIC_TYPE = 'f1_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
 
 SHOTS = 20
@@ -119,9 +119,9 @@ Dataset_Name = 'Lavyanut'
 
 
 
-SAVE_DIR = f"models3/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models5/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs3/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs5/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -496,19 +496,14 @@ def main():
         # ==============================================================
         novel_class_idx = le.transform([TARGET_NOVEL_CLASS])[0]
         
-        base_class_indices =[idx for idx in range(num_classes) if idx != novel_class_idx]
+        # 1. Identify pure base classes (exclude the real novel class entirely)
+        base_class_indices = [idx for idx in range(num_classes) if idx != novel_class_idx]
         
-        # Force a diverse set of simulated classes to ensure generalization!
-        # We pick one small, one medium, and one heavy truck.
-        diverse_simulation_names = ['Small', 'MediumStandard', 'LongHeavyDuty']
-        # Filter out the actual target just in case it overlaps with our simulation set
-        diverse_simulation_names =[name for name in diverse_simulation_names if name != TARGET_NOVEL_CLASS]
-        
-        simulated_novel_indices = le.transform(diverse_simulation_names)
-        
-        print(f"\n--- Setting up Meta-Optuna Generalized Few-Shot Simulation ---")
+        # 2. Randomly select 3 Base classes to act as our "Simulated 5-shot Novel Classes"
+        simulated_novel_indices = np.random.choice(base_class_indices, size=3, replace=False)
+        print(f"\n--- Setting up Meta-Optuna Few-Shot Simulation ---")
         print(f"Hiding real novel class: {TARGET_NOVEL_CLASS}")
-        print(f"Simulating K-shot learning on DIVERSE base classes: {diverse_simulation_names}")
+        print(f"Simulating K-shot learning on base classes: {le.inverse_transform(simulated_novel_indices)}")
 
         # 3. Create the Meta-Training Dataset
         X_meta_tr_list, y_meta_tr_list = [], []
