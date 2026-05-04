@@ -72,7 +72,7 @@ DISTANCE_METRIC = 'cosine'
 # Options: 'focal_center', 'triplet_center', 'focal_triplet_center'
 LOSS_COMBINATION = 'focal_center'
 
-CUSTOM_METRIC_TYPE = 'f2_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
+CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
 
 SHOTS = 20
