@@ -135,8 +135,8 @@ if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
-    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklift_{SHOTS}_shots/'
-    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklift_{SHOTS}_shots/'
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklifts_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklifts_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDuty':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('Forklifts')

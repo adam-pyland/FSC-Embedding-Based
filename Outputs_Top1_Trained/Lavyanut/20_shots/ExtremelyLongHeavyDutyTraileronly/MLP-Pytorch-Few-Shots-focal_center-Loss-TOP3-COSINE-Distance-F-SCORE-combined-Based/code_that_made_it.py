@@ -55,11 +55,10 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
 
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
-if WORK_PLACE == 'WSL':
-    data_path = '/mnt/c/Adams/FSOD/Data/Lavyanut/Lavyanut'
+
 # Top-K Metrics
 USE_TOP_K_METRICS = True
 TOP_K_VALUE = 3
@@ -72,34 +71,31 @@ DISTANCE_METRIC = 'cosine'
 # Options: 'focal_center', 'triplet_center', 'focal_triplet_center'
 LOSS_COMBINATION = 'focal_center'
 
-CUSTOM_METRIC_TYPE = 'f2_novel' # use 'f1_novel', 'f2_novel' or 'combined' 
+CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
-
-SHOTS = 20
 
 BEST_HYPERPARAMETERS=None
 
 # BEST_HYPERPARAMETERS = {
-#     "batch_size": 1024,
-#     "gamma": 2.580627947590925,
-#     "center_weight": 0.028365290137279026,
-#     "lr": 0.004351134823645674,
-#     "weight_decay": 0.003054107429563069,
-#     "weight_smoothing": 0.5503699400128665,
-#     "novel_multiplier": 9.498785088342668
+#     "batch_size": 256,
+#     "gamma": 1.3056901954219682,
+#     "center_weight": 0.01836520533009293,
+#     "lr": 0.0012824442659618756,
+#     "weight_decay": 0.00011775557151085135,
+#     "weight_smoothing": 0.3462141540802811,
+#     "novel_multiplier": 5.310693283800326
 # }
 
 
 MAX_EPOCHS = 500
 
 # Combined Metric ratios for F1 and F2 scores
-F2_NOVEL_RATIO = 0.80; F1_ALL_RATIO = 0.20
+F2_NOVEL_RATIO = 0.70; F1_ALL_RATIO = 0.30
 
 ALL_CLASSES = [
 'Bulldozers',
 'CementMixerTrucks',
 'ExtremelyLongHeavyDutyTraileronly',
-'ExtremelyLongHeavyDuty',
 'Forklifts',
 'HeavyDuty',
 'LongHeavyDuty',
@@ -115,13 +111,13 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
+SHOTS = 20
 
 
 
+SAVE_DIR = f"models_TOP1_Trained/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-SAVE_DIR = f"models4/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
-
-PLOT_DIR = f"Outputs4/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_Top1_Trained/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -129,19 +125,12 @@ VAL_BASE_DIR  = f'{data_path}/Obj_Embs/test/base_class/'
 
 if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
-    ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
-    VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_trailer_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_TOP1_trailer_{SHOTS}_shots/' ### novel_class_TOP1_trailer_20_shots
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
-    ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
-    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklift_{SHOTS}_shots/'
-    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklift_{SHOTS}_shots/'
-elif TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDuty':
-    ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
-    ALL_CLASSES.remove('Forklifts')
-    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/heavyduty_{SHOTS}_shots/'
-    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_heavyduty_{SHOTS}_shots/'
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklifts_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklifts_{SHOTS}_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
 
@@ -496,19 +485,14 @@ def main():
         # ==============================================================
         novel_class_idx = le.transform([TARGET_NOVEL_CLASS])[0]
         
-        base_class_indices =[idx for idx in range(num_classes) if idx != novel_class_idx]
+        # 1. Identify pure base classes (exclude the real novel class entirely)
+        base_class_indices = [idx for idx in range(num_classes) if idx != novel_class_idx]
         
-        # Force a diverse set of simulated classes to ensure generalization!
-        # We pick one small, one medium, and one heavy truck.
-        diverse_simulation_names = ['Small', 'MediumStandard', 'LongHeavyDuty']
-        # Filter out the actual target just in case it overlaps with our simulation set
-        diverse_simulation_names =[name for name in diverse_simulation_names if name != TARGET_NOVEL_CLASS]
-        
-        simulated_novel_indices = le.transform(diverse_simulation_names)
-        
-        print(f"\n--- Setting up Meta-Optuna Generalized Few-Shot Simulation ---")
+        # 2. Randomly select 3 Base classes to act as our "Simulated 5-shot Novel Classes"
+        simulated_novel_indices = np.random.choice(base_class_indices, size=3, replace=False)
+        print(f"\n--- Setting up Meta-Optuna Few-Shot Simulation ---")
         print(f"Hiding real novel class: {TARGET_NOVEL_CLASS}")
-        print(f"Simulating K-shot learning on DIVERSE base classes: {diverse_simulation_names}")
+        print(f"Simulating K-shot learning on base classes: {le.inverse_transform(simulated_novel_indices)}")
 
         # 3. Create the Meta-Training Dataset
         X_meta_tr_list, y_meta_tr_list = [], []
