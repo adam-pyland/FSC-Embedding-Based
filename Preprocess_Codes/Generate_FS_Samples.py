@@ -7,11 +7,22 @@ def load_npy_folder(folder_path):
     file_paths = glob.glob(os.path.join(folder_path, "*.npy"))
     if not file_paths:
         raise ValueError(f"No .npy files found in {folder_path}")
-        
-    features = [np.load(f) for f in file_paths]
-    return np.vstack(features)
+    
+    features = []
+    class_names = []
 
-def generate_smote_features(original_features, num_to_generate, k_neighbors=5):
+    for f in file_paths:
+        features.append(np.load(f))
+
+        filename = os.path.basename(f)
+        parts = filename.split("_")
+        class_name = parts[-2]
+        class_names.append(class_name)
+    
+    return np.vstack(features), class_name
+
+def generate_smote_features(original_features, num_to_generate, k_neighbors=5, seed=42):
+    rng = np.random.default_rng(seed)
     n_existing = original_features.shape[0]
     k = min(k_neighbors, n_existing - 1)
     
@@ -21,13 +32,13 @@ def generate_smote_features(original_features, num_to_generate, k_neighbors=5):
     synthetic_samples = []
     
     for _ in range(num_to_generate):
-        base_idx = np.random.randint(0, n_existing)
+        base_idx = rng.integers(0, n_existing)
         base_point = original_features[base_idx]
         
-        neighbor_idx = np.random.choice(indices[base_idx, 1:])
+        neighbor_idx = rng.choice(indices[base_idx, 1:])
         neighbor_point = original_features[neighbor_idx]
         
-        gap = np.random.rand()
+        gap = rng.random()
         new_point = base_point + gap * (neighbor_point - base_point)
         
         synthetic_samples.append(new_point)
@@ -54,7 +65,8 @@ if __name__ == "__main__":
     
     os.makedirs(output_folder, exist_ok=True)
     
-    original_shots = load_npy_folder(few_shots_folder)
+    original_shots, class_name = load_npy_folder(few_shots_folder)
+    print(f"Detected class: {class_name}")
     print(f"Original shots shape: {original_shots.shape}")
     
     synthetic_shots = generate_smote_features(
@@ -66,7 +78,7 @@ if __name__ == "__main__":
     
     # NEW: save each synthetic sample
     for i, sample in enumerate(synthetic_shots):
-        save_path = os.path.join(output_folder, f"synthetic_{i:03d}.npy")
+        save_path = os.path.join(output_folder, f"synthetic_{class_name}_{i:03d}.npy")
         np.save(save_path, sample)
     
     final_novel_class_features = np.vstack((original_shots, synthetic_shots))

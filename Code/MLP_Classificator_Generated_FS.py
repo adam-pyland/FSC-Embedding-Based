@@ -407,7 +407,8 @@ def main():
 
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
 
-    X_train, y_train = [],[]
+    X_train_real, y_train_real = [],[]
+    X_train_gen, y_train_gen = [], []
     X_test, y_test = [],[]
 
     def load_features_from_dir(directory, X_list, y_list):
@@ -425,31 +426,47 @@ def main():
                     y_list.append(cls) 
                     break
 
-    print("Loading 100% of Training features... (This might take a minute)")
-    load_features_from_dir(train_base_dir, X_train, y_train)
-    load_features_from_dir(train_novel_dir, X_train, y_train)
+    print("Loading Training features... (This might take a minute)")
+    # 1. Load REAL data separately
+    load_features_from_dir(train_base_dir, X_train_real, y_train_real)
+    load_features_from_dir(train_novel_dir, X_train_real, y_train_real)
+    
+    # 2. Load GENERATED data separately
     if FS_GENERATION:
-        load_features_from_dir(train_novel_generated_dir, X_train, y_train)
+        load_features_from_dir(train_novel_generated_dir, X_train_gen, y_train_gen)
 
     print("Loading Validation/Testing features...")
     load_features_from_dir(val_base_dir, X_test, y_test)
     load_features_from_dir(val_novel_dir, X_test, y_test)
 
-    X_train = np.array(X_train)
-    y_train = np.array(y_train)
+    X_train_real = np.array(X_train_real)
+    y_train_real = np.array(y_train_real)
+    X_train_gen = np.array(X_train_gen)
+    y_train_gen = np.array(y_train_gen)
     X_test = np.array(X_test)
     y_test = np.array(y_test)
     
-    print(f"Loaded {X_train.shape[0]} training embeddings.")
+    print(f"Loaded {X_train_real.shape[0]} REAL training embeddings.")
+    if FS_GENERATION:
+        print(f"Loaded {X_train_gen.shape[0]} GENERATED training embeddings.")
     print(f"Loaded {X_test.shape[0]} validation embeddings.")
 
-    if X_train.shape[0] == 0 or X_test.shape[0] == 0:
+    if X_train_real.shape[0] == 0 or X_test.shape[0] == 0:
         print("Error: Training or testing data is empty. Please check your file paths.")
         return
 
     le = LabelEncoder()
-    y_train_encoded = le.fit_transform(y_train)
+    # Fit LabelEncoder on all possible labels to be safe
+    y_all_train_labels = np.concatenate([y_train_real, y_train_gen]) if len(y_train_gen) > 0 else y_train_real
+    le.fit(np.concatenate([y_all_train_labels, y_test]))
+    
+    y_real_encoded = le.transform(y_train_real)
+    y_gen_encoded = le.transform(y_train_gen) if len(y_train_gen) > 0 else np.array([])
     y_test_encoded = le.transform(y_test)
+
+    # Combine everything for the final visualization logic later in the script
+    X_train_full = np.vstack([X_train_real, X_train_gen]) if len(X_train_gen) > 0 else X_train_real
+    y_train_encoded = np.concatenate([y_real_encoded, y_gen_encoded]) if len(y_train_gen) > 0 else y_real_encoded
 
     os.makedirs(SAVE_DIR, exist_ok=True) 
     
@@ -461,7 +478,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    input_dim = X_train.shape[1]
+    input_dim = X_train_real.shape[1]
     num_classes = len(le.classes_)
     
     model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
@@ -481,18 +498,40 @@ def main():
         scaler = load(scaler_file)
         le = load(le_file)
         X_test_scaled = scaler.transform(X_test)
-        X_train_scaled = scaler.fit_transform(X_train)
+        # Note: I also fixed a tiny bug here! (You previously had scaler.fit_transform(X_train) on the saved scaler)
+        X_train_scaled = scaler.transform(X_train_full) 
     else:
         print("\nNo saved model found. Preparing for Training...")
-        # scaler = StandardScaler()
+        
+        # ==========================================
+        # SMART TRAIN / VAL SPLIT (NO GENERATED DATA IN VAL)
+        # ==========================================
+        # Split ONLY the real data into 90% Train / 10% Validation
+        X_tr_real, X_val_real, y_tr_real, y_val_real = train_test_split(
+            X_train_real, y_real_encoded, test_size=0.1, random_state=42, stratify=y_real_encoded
+        )
+
+        # Add 100% of the GENERATED data strictly to the Training Split
+        if len(X_train_gen) > 0:
+            X_tr = np.vstack([X_tr_real, X_train_gen])
+            y_tr = np.concatenate([y_tr_real, y_gen_encoded])
+        else:
+            X_tr = X_tr_real
+            y_tr = y_tr_real
+
+        X_val = X_val_real
+        y_val = y_val_real
+
+        # Scaler
         scaler = Normalizer(norm='l2')
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test) 
+        # Fit the scaler ONLY on the data the model uses to train
+        X_tr = scaler.fit_transform(X_tr)
+        X_val = scaler.transform(X_val)
+        X_test_scaled = scaler.transform(X_test)
+        X_train_scaled = scaler.transform(X_train_full) 
         
         dump(scaler, scaler_file)
         dump(le, le_file)
-        
-        X_tr, X_val, y_tr, y_val = train_test_split(X_train_scaled, y_train_encoded, test_size=0.1, random_state=42, stratify=y_train_encoded)
         
         # Define DataLoaders once
         batch_size = 2048
