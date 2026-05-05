@@ -55,9 +55,9 @@ def seed_everything(seed=42):
 # Global Configuration & Top-K / Distance Flags
 # ==========================================
 
-WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
+WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'
 
-data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
+data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut_old' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
 
 # Top-K Metrics
 USE_TOP_K_METRICS = True
@@ -74,17 +74,17 @@ LOSS_COMBINATION = 'focal_center'
 CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
 
-BEST_HYPERPARAMETERS=None
+# BEST_HYPERPARAMETERS=None
 
-# BEST_HYPERPARAMETERS = {
-#     "batch_size": 256,
-#     "gamma": 1.3056901954219682,
-#     "center_weight": 0.01836520533009293,
-#     "lr": 0.0012824442659618756,
-#     "weight_decay": 0.00011775557151085135,
-#     "weight_smoothing": 0.3462141540802811,
-#     "novel_multiplier": 5.310693283800326
-# }
+BEST_HYPERPARAMETERS = {
+    "batch_size": 512,
+    "gamma": 1.7112461378820052,
+    "center_weight": 0.04043393144785676,
+    "lr": 0.002296892904961805,
+    "weight_decay": 6.314269748555762e-05,
+    "weight_smoothing": 0.7456857255549503,
+    "novel_multiplier": 1.320137299575476
+}
 
 
 MAX_EPOCHS = 500
@@ -117,7 +117,7 @@ SHOTS = 20
 
 SAVE_DIR = f"models_TOP1_Trained/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs_Top1_Trained/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_TOP1_Trained/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -125,7 +125,7 @@ VAL_BASE_DIR  = f'{data_path}/Obj_Embs/test/base_class/'
 
 if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
-    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/TOP1_trailer_{SHOTS}_shots/'
     VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_TOP1_trailer_{SHOTS}_shots/' ### novel_class_TOP1_trailer_20_shots
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
