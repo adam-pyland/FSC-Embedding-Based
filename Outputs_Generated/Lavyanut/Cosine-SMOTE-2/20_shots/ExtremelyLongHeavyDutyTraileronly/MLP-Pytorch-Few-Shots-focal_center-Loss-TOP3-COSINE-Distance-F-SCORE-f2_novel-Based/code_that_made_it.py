@@ -116,7 +116,7 @@ VISUALIZATION_SOURCE = 'train'
 Dataset_Name = 'Lavyanut'
 
 FS_GENERATION = True
-FS_GENERATION_METHOD = 'Cosine-SMOTE-3'
+FS_GENERATION_METHOD = 'Cosine-SMOTE-2'
 
 
 

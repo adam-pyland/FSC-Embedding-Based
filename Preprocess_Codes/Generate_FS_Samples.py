@@ -174,7 +174,7 @@ if __name__ == "__main__":
     
     synthetic_shots = generate_smote_features_cosine(
         original_features=original_shots, 
-        num_to_generate=80, 
+        num_to_generate=480, 
         k_neighbors=5
     )
     print(f"Synthetic shots shape: {synthetic_shots.shape}")
