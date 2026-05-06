@@ -14,6 +14,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
+from scipy.spatial.distance import euclidean
+
 import optuna
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder, Normalizer
@@ -50,6 +52,10 @@ def seed_everything(seed=42):
     # Force deterministic algorithms in cuDNN
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+
+
 
 # ==========================================
 # Global Configuration & Top-K / Distance Flags
@@ -115,14 +121,13 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
-FS_GENERATION = True
-FS_GENERATION_METHOD = 'Cosine-SMOTE-3'
 
+FS_GENERATION_METHOD = 'Distribution-Calibration-2'
 
 
 SAVE_DIR = f"models_Generated/{Dataset_Name}/{FS_GENERATION_METHOD}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs_Generated/{Dataset_Name}/{FS_GENERATION_METHOD}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_Generated/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -132,25 +137,72 @@ if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
     ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
-    if FS_GENERATION:
-        TRAIN_NOVEL_GENERATED_DIR =  f'{data_path}/Obj_Embs/train/Generated_trailer_{SHOTS}_shots/'
     VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_trailer_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklift_{SHOTS}_shots/'
-    if FS_GENERATION:
-        TRAIN_NOVEL_GENERATED_DIR =  f'{data_path}/Obj_Embs/train/Generated_forklift_{SHOTS}_shots/'
     VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklift_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDuty':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('Forklifts')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/heavyduty_{SHOTS}_shots/'
-    if FS_GENERATION:
-        TRAIN_NOVEL_GENERATED_DIR =  f'{data_path}/Obj_Embs/train/Generated_ExtremelyLongHeavyDuty_{SHOTS}_shots/'
     VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_heavyduty_{SHOTS}_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
+
+
+
+# ===========================================================================================
+
+def tukey_transform(features, power=0.5):
+    """Applies Tukey transform to make DINO features strictly Gaussian."""
+    return np.sign(features) * np.power(np.abs(features), power)
+
+def apply_distribution_calibration(X, y, base_classes, novel_classes, num_samples=500, variance_multiplier=1.25):
+    """Generates new features for novel classes using Base Class covariance."""
+    print(f"--- Applying Distribution Calibration for {novel_classes} ---")
+    feature_dim = X.shape[1]
+    base_stats = {}
+    
+    # 1. Calculate stats for base classes
+    for b_class in base_classes:
+        feats = X[y == b_class]
+        if len(feats) == 0: continue
+        mean = np.mean(feats, axis=0)
+        cov = np.cov(feats, rowvar=False) + np.eye(feature_dim) * 1e-4
+        base_stats[b_class] = {'mean': mean, 'cov': cov}
+        
+    generated_X, generated_y = [],[]
+    
+    # 2. Calibrate and sample for novel classes
+    for n_class in novel_classes:
+        few_shots = X[y == n_class]
+        if len(few_shots) == 0: continue
+        
+        novel_mean = np.mean(few_shots, axis=0)
+        
+        # Find closest base class
+        distances = {b_class: euclidean(novel_mean, stats['mean']) for b_class, stats in base_stats.items()}
+        closest_base = min(distances, key=distances.get)
+        print(f" -> Calibrating novel class '{n_class}' using covariance of '{closest_base}'")
+        
+        # Sample features
+        expanded_cov = base_stats[closest_base]['cov'] * variance_multiplier
+        sampled_feats = np.random.multivariate_normal(novel_mean, expanded_cov, num_samples)
+        generated_X.append(sampled_feats)
+        
+        # Support both integer and string labels seamlessly
+        if isinstance(n_class, str):
+            generated_y.extend([n_class] * num_samples)
+        else:
+            generated_y.extend([int(n_class)] * num_samples)
+            
+    if generated_X:
+        X = np.vstack([X, np.vstack(generated_X)])
+        y = np.concatenate([y, np.array(generated_y)])
+        
+    return X, y
 
 
 # ==========================================
@@ -397,9 +449,6 @@ def main():
     train_base_dir = TRAIN_BASE_DIR
     train_novel_dir = TRAIN_NOVEL_DIR
 
-    if FS_GENERATION:
-        train_novel_generated_dir = TRAIN_NOVEL_GENERATED_DIR
-
     val_base_dir = VAL_BASE_DIR
     val_novel_dir = VAL_NOVEL_DIR
 
@@ -407,8 +456,7 @@ def main():
 
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
 
-    X_train_real, y_train_real = [],[]
-    X_train_gen, y_train_gen = [], []
+    X_train, y_train = [],[]
     X_test, y_test = [],[]
 
     def load_features_from_dir(directory, X_list, y_list):
@@ -426,47 +474,62 @@ def main():
                     y_list.append(cls) 
                     break
 
-    print("Loading Training features... (This might take a minute)")
-    # 1. Load REAL data separately
-    load_features_from_dir(train_base_dir, X_train_real, y_train_real)
-    load_features_from_dir(train_novel_dir, X_train_real, y_train_real)
-    
-    # 2. Load GENERATED data separately
-    if FS_GENERATION:
-        load_features_from_dir(train_novel_generated_dir, X_train_gen, y_train_gen)
+    print("Loading 100% of Training features... (This might take a minute)")
+    load_features_from_dir(train_base_dir, X_train, y_train)
+    load_features_from_dir(train_novel_dir, X_train, y_train)
 
     print("Loading Validation/Testing features...")
     load_features_from_dir(val_base_dir, X_test, y_test)
     load_features_from_dir(val_novel_dir, X_test, y_test)
 
-    X_train_real = np.array(X_train_real)
-    y_train_real = np.array(y_train_real)
-    X_train_gen = np.array(X_train_gen)
-    y_train_gen = np.array(y_train_gen)
-    X_test = np.array(X_test)
-    y_test = np.array(y_test)
+    if len(X_train) == 0 or len(X_test) == 0:
+        print("Error: Training or testing data is empty. Please check your WORK_PLACE file paths!")
+        return
     
-    print(f"Loaded {X_train_real.shape[0]} REAL training embeddings.")
-    if FS_GENERATION:
-        print(f"Loaded {X_train_gen.shape[0]} GENERATED training embeddings.")
+    X_train = np.vstack(X_train)
+    y_train = np.array(y_train)
+    X_test = np.vstack(X_test)
+    y_test = np.array(y_test)
+
+    print(f"Loaded {X_train.shape[0]} training embeddings (Dim: {X_train.shape[1]}).")
+    print(f"Loaded {X_test.shape[0]} validation embeddings (Dim: {X_test.shape[1]}).")
+
+    # ==============================================================
+    # ADDED: DISTRIBUTION CALIBRATION (MAIN DATASET)
+    # ==============================================================
+    print("\nApplying Tukey Transform to make features Gaussian...")
+    X_train = tukey_transform(X_train)
+    X_test = tukey_transform(X_test)  # Must transform test set so spaces match
+    
+    base_class_names = [c for c in all_classes if c != TARGET_NOVEL_CLASS]
+    
+    # Hallucinate 500 new samples for our target novel class
+    X_train, y_train = apply_distribution_calibration(
+        X=X_train, 
+        y=y_train, 
+        base_classes=base_class_names, 
+        novel_classes=[TARGET_NOVEL_CLASS], 
+        num_samples=1500, # Increased!
+        variance_multiplier=1.25 # Widens the boundary
+    )
+    # ==============================================================
+    
+    print(f"Final Augmented Training Set Size: {X_train.shape[0]} embeddings.")
+
+    le = LabelEncoder()
+
+    print(f"Loaded {X_train.shape[0]} training embeddings.")
+    
+    print(f"Loaded {X_train.shape[0]} training embeddings.")
     print(f"Loaded {X_test.shape[0]} validation embeddings.")
 
-    if X_train_real.shape[0] == 0 or X_test.shape[0] == 0:
+    if X_train.shape[0] == 0 or X_test.shape[0] == 0:
         print("Error: Training or testing data is empty. Please check your file paths.")
         return
 
     le = LabelEncoder()
-    # Fit LabelEncoder on all possible labels to be safe
-    y_all_train_labels = np.concatenate([y_train_real, y_train_gen]) if len(y_train_gen) > 0 else y_train_real
-    le.fit(np.concatenate([y_all_train_labels, y_test]))
-    
-    y_real_encoded = le.transform(y_train_real)
-    y_gen_encoded = le.transform(y_train_gen) if len(y_train_gen) > 0 else np.array([])
+    y_train_encoded = le.fit_transform(y_train)
     y_test_encoded = le.transform(y_test)
-
-    # Combine everything for the final visualization logic later in the script
-    X_train_full = np.vstack([X_train_real, X_train_gen]) if len(X_train_gen) > 0 else X_train_real
-    y_train_encoded = np.concatenate([y_real_encoded, y_gen_encoded]) if len(y_train_gen) > 0 else y_real_encoded
 
     os.makedirs(SAVE_DIR, exist_ok=True) 
     
@@ -478,7 +541,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    input_dim = X_train_real.shape[1]
+    input_dim = X_train.shape[1]
     num_classes = len(le.classes_)
     
     model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
@@ -498,40 +561,18 @@ def main():
         scaler = load(scaler_file)
         le = load(le_file)
         X_test_scaled = scaler.transform(X_test)
-        # Note: I also fixed a tiny bug here! (You previously had scaler.fit_transform(X_train) on the saved scaler)
-        X_train_scaled = scaler.transform(X_train_full) 
+        X_train_scaled = scaler.fit_transform(X_train)
     else:
         print("\nNo saved model found. Preparing for Training...")
-        
-        # ==========================================
-        # SMART TRAIN / VAL SPLIT (NO GENERATED DATA IN VAL)
-        # ==========================================
-        # Split ONLY the real data into 90% Train / 10% Validation
-        X_tr_real, X_val_real, y_tr_real, y_val_real = train_test_split(
-            X_train_real, y_real_encoded, test_size=0.1, random_state=42, stratify=y_real_encoded
-        )
-
-        # Add 100% of the GENERATED data strictly to the Training Split
-        if len(X_train_gen) > 0:
-            X_tr = np.vstack([X_tr_real, X_train_gen])
-            y_tr = np.concatenate([y_tr_real, y_gen_encoded])
-        else:
-            X_tr = X_tr_real
-            y_tr = y_tr_real
-
-        X_val = X_val_real
-        y_val = y_val_real
-
-        # Scaler
+        # scaler = StandardScaler()
         scaler = Normalizer(norm='l2')
-        # Fit the scaler ONLY on the data the model uses to train
-        X_tr = scaler.fit_transform(X_tr)
-        X_val = scaler.transform(X_val)
-        X_test_scaled = scaler.transform(X_test)
-        X_train_scaled = scaler.transform(X_train_full) 
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test) 
         
         dump(scaler, scaler_file)
         dump(le, le_file)
+        
+        X_tr, X_val, y_tr, y_val = train_test_split(X_train_scaled, y_train_encoded, test_size=0.1, random_state=42, stratify=y_train_encoded)
         
         # Define DataLoaders once
         batch_size = 2048
@@ -583,6 +624,25 @@ def main():
                 
         X_meta_tr = np.vstack(X_meta_tr_list)
         y_meta_tr = np.concatenate(y_meta_tr_list)
+
+        # ==============================================================
+        # ADDED: DISTRIBUTION CALIBRATION (OPTUNA SIMULATION)
+        # ==============================================================
+        # Identify the remaining "pure" base classes (as integers)
+        pure_base_indices = [idx for idx in base_class_indices if idx not in simulated_novel_indices]
+        
+        print("\n[Optuna Meta-Train] Applying DC to simulated novel classes...")
+        X_meta_tr, y_meta_tr = apply_distribution_calibration(
+            X=X_meta_tr, 
+            y=y_meta_tr, 
+            base_classes=pure_base_indices, 
+            novel_classes=list(simulated_novel_indices), 
+            num_samples=500
+        )
+        # ==============================================================
+
+        meta_train_dataset = TensorDataset(torch.FloatTensor(X_meta_tr), torch.LongTensor(y_meta_tr))
+
         meta_train_dataset = TensorDataset(torch.FloatTensor(X_meta_tr), torch.LongTensor(y_meta_tr))
         
         # 4. Create Meta-Validation Dataset (Exclude real novel class, keep full val set for simulated ones)
@@ -603,7 +663,7 @@ def main():
             lr = trial.suggest_float('lr', 1e-4, 5e-3, log=True)
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
-            novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
+            novel_multiplier = trial.suggest_float('novel_multiplier', 4.0, 15.0)
 
             # Apply multiplier to the 3 SIMULATED novel classes
             smoothed_weights = np.power(full_meta_raw_weights, weight_smoothing)
