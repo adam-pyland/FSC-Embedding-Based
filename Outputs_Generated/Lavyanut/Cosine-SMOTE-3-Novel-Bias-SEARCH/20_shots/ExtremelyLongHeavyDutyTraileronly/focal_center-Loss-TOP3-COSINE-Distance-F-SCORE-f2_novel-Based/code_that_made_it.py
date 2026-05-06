@@ -77,17 +77,17 @@ SEED = 9
 
 SHOTS = 20
 
+NOVEL_BIAS = 0.5
+
 BEST_HYPERPARAMETERS=None
 
-# BEST_HYPERPARAMETERS = {
-#     "batch_size": 1024,
-#     "gamma": 2.580627947590925,
-#     "center_weight": 0.028365290137279026,
-#     "lr": 0.004351134823645674,
-#     "weight_decay": 0.003054107429563069,
-#     "weight_smoothing": 0.5503699400128665,
-#     "novel_multiplier": 9.498785088342668
-# }
+# BEST_HYPERPARAMETERS = {'batch_size': 512,
+#                         'gamma': 1.7112461378820052,
+#                         'center_weight': 0.04043393144785676,
+#                         'lr': 0.002296892904961805,
+#                         'weight_decay': 6.314269748555762e-05,
+#                         'weight_smoothing': 0.7456857255549503,
+#                         'novel_multiplier': 1.320137299575476}
 
 
 MAX_EPOCHS = 500
@@ -115,11 +115,14 @@ VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
 
+FS_GENERATION = True
+FS_GENERATION_METHOD = 'Cosine-SMOTE-3-Novel-Bias-SEARCH'
 
 
-SAVE_DIR = f"models5/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs5/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models_Generated/{Dataset_Name}/{FS_GENERATION_METHOD}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+
+PLOT_DIR = f"Outputs_Generated/{Dataset_Name}/{FS_GENERATION_METHOD}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -129,16 +132,22 @@ if TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDutyTraileronly':
     ALL_CLASSES.remove('Forklifts')
     ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/trailer_{SHOTS}_shots/'
+    if FS_GENERATION:
+        TRAIN_NOVEL_GENERATED_DIR =  f'{data_path}/Obj_Embs/train/Generated_trailer_{SHOTS}_shots/'
     VAL_NOVEL_DIR   =f'{data_path}/Obj_Embs/test/novel_class_trailer_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'Forklifts':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('ExtremelyLongHeavyDuty')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklift_{SHOTS}_shots/'
+    if FS_GENERATION:
+        TRAIN_NOVEL_GENERATED_DIR =  f'{data_path}/Obj_Embs/train/Generated_forklift_{SHOTS}_shots/'
     VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklift_{SHOTS}_shots/'
 elif TARGET_NOVEL_CLASS == 'ExtremelyLongHeavyDuty':
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('Forklifts')
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/heavyduty_{SHOTS}_shots/'
+    if FS_GENERATION:
+        TRAIN_NOVEL_GENERATED_DIR =  f'{data_path}/Obj_Embs/train/Generated_ExtremelyLongHeavyDuty_{SHOTS}_shots/'
     VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_heavyduty_{SHOTS}_shots/'
 else:
     raise ValueError("Unknown target class for directories!")
@@ -277,16 +286,25 @@ def compute_train_logit_centers(model, dataloader, num_classes, device):
             counts.index_add_(0, labels, torch.ones_like(labels, dtype=torch.float))
     return (logit_centers / counts.clamp(min=1e-8).unsqueeze(1)).cpu().numpy()
 
-def get_predictions(scores, labels, top_k=1, use_top_k=False):
+def get_predictions(scores, labels, top_k=1, use_top_k=False, novel_idx=None, novel_bias=0.0):
     """
     Returns predictions based on top-1 or top-k logic using provided scores.
+    Optionally applies a bias to the novel class to prioritize Recall.
     """
+    # Clone scores to avoid modifying the original tensor in memory
+    scores_shifted = scores.clone()
+    
+    # Apply the artificial bias to the Novel Class
+    if novel_idx is not None and novel_bias != 0.0:
+        scores_shifted[:, novel_idx] += novel_bias
+
+    # --- Standard Prediction Logic using the Shifted Scores ---
     if not use_top_k or top_k <= 1:
-        _, preds = torch.max(scores, 1)
+        _, preds = torch.max(scores_shifted, 1)
         return preds
     
-    actual_top_k = min(top_k, scores.size(1))
-    _, top_k_preds = torch.topk(scores, actual_top_k, dim=1)
+    actual_top_k = min(top_k, scores_shifted.size(1))
+    _, top_k_preds = torch.topk(scores_shifted, actual_top_k, dim=1)
     
     labels_expanded = labels.view(-1, 1)
     correct_in_top_k = (top_k_preds == labels_expanded).any(dim=1)
@@ -295,6 +313,22 @@ def get_predictions(scores, labels, top_k=1, use_top_k=False):
     final_preds = torch.where(correct_in_top_k, labels, top_1_preds)
     
     return final_preds
+
+def get_predictions_with_bias(scores, labels, novel_idx, novel_bias=1.5):
+    """
+    scores: The output logits from the model
+    novel_bias: How much to artificially boost the novel class score. 
+                Higher bias = Higher Recall, Lower Precision.
+    """
+    shifted_scores = scores.clone()
+    
+    # Artificially boost the score of the target novel class
+    shifted_scores[:, novel_idx] += novel_bias 
+    
+    # Take the top-1 prediction based on the shifted scores
+    _, preds = torch.max(shifted_scores, 1)
+    
+    return preds
 
 def evaluate_and_visualize_superclasses(y_test, y_pred, X_viz, y_test_viz, centers_viz=None, le=None, metric_name=''):
     base_subclasses = [
@@ -388,6 +422,9 @@ def main():
     train_base_dir = TRAIN_BASE_DIR
     train_novel_dir = TRAIN_NOVEL_DIR
 
+    if FS_GENERATION:
+        train_novel_generated_dir = TRAIN_NOVEL_GENERATED_DIR
+
     val_base_dir = VAL_BASE_DIR
     val_novel_dir = VAL_NOVEL_DIR
 
@@ -395,7 +432,8 @@ def main():
 
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
 
-    X_train, y_train = [],[]
+    X_train_real, y_train_real = [],[]
+    X_train_gen, y_train_gen = [], []
     X_test, y_test = [],[]
 
     def load_features_from_dir(directory, X_list, y_list):
@@ -413,29 +451,47 @@ def main():
                     y_list.append(cls) 
                     break
 
-    print("Loading 100% of Training features... (This might take a minute)")
-    load_features_from_dir(train_base_dir, X_train, y_train)
-    load_features_from_dir(train_novel_dir, X_train, y_train)
+    print("Loading Training features... (This might take a minute)")
+    # 1. Load REAL data separately
+    load_features_from_dir(train_base_dir, X_train_real, y_train_real)
+    load_features_from_dir(train_novel_dir, X_train_real, y_train_real)
+    
+    # 2. Load GENERATED data separately
+    if FS_GENERATION:
+        load_features_from_dir(train_novel_generated_dir, X_train_gen, y_train_gen)
 
     print("Loading Validation/Testing features...")
     load_features_from_dir(val_base_dir, X_test, y_test)
     load_features_from_dir(val_novel_dir, X_test, y_test)
 
-    X_train = np.array(X_train)
-    y_train = np.array(y_train)
+    X_train_real = np.array(X_train_real)
+    y_train_real = np.array(y_train_real)
+    X_train_gen = np.array(X_train_gen)
+    y_train_gen = np.array(y_train_gen)
     X_test = np.array(X_test)
     y_test = np.array(y_test)
     
-    print(f"Loaded {X_train.shape[0]} training embeddings.")
+    print(f"Loaded {X_train_real.shape[0]} REAL training embeddings.")
+    if FS_GENERATION:
+        print(f"Loaded {X_train_gen.shape[0]} GENERATED training embeddings.")
     print(f"Loaded {X_test.shape[0]} validation embeddings.")
 
-    if X_train.shape[0] == 0 or X_test.shape[0] == 0:
+    if X_train_real.shape[0] == 0 or X_test.shape[0] == 0:
         print("Error: Training or testing data is empty. Please check your file paths.")
         return
 
     le = LabelEncoder()
-    y_train_encoded = le.fit_transform(y_train)
+    # Fit LabelEncoder on all possible labels to be safe
+    y_all_train_labels = np.concatenate([y_train_real, y_train_gen]) if len(y_train_gen) > 0 else y_train_real
+    le.fit(np.concatenate([y_all_train_labels, y_test]))
+    
+    y_real_encoded = le.transform(y_train_real)
+    y_gen_encoded = le.transform(y_train_gen) if len(y_train_gen) > 0 else np.array([])
     y_test_encoded = le.transform(y_test)
+
+    # Combine everything for the final visualization logic later in the script
+    X_train_full = np.vstack([X_train_real, X_train_gen]) if len(X_train_gen) > 0 else X_train_real
+    y_train_encoded = np.concatenate([y_real_encoded, y_gen_encoded]) if len(y_train_gen) > 0 else y_real_encoded
 
     os.makedirs(SAVE_DIR, exist_ok=True) 
     
@@ -447,7 +503,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    input_dim = X_train.shape[1]
+    input_dim = X_train_real.shape[1]
     num_classes = len(le.classes_)
     
     model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
@@ -467,18 +523,40 @@ def main():
         scaler = load(scaler_file)
         le = load(le_file)
         X_test_scaled = scaler.transform(X_test)
-        X_train_scaled = scaler.fit_transform(X_train)
+        # Note: I also fixed a tiny bug here! (You previously had scaler.fit_transform(X_train) on the saved scaler)
+        X_train_scaled = scaler.transform(X_train_full) 
     else:
         print("\nNo saved model found. Preparing for Training...")
-        # scaler = StandardScaler()
+        
+        # ==========================================
+        # SMART TRAIN / VAL SPLIT (NO GENERATED DATA IN VAL)
+        # ==========================================
+        # Split ONLY the real data into 90% Train / 10% Validation
+        X_tr_real, X_val_real, y_tr_real, y_val_real = train_test_split(
+            X_train_real, y_real_encoded, test_size=0.1, random_state=42, stratify=y_real_encoded
+        )
+
+        # Add 100% of the GENERATED data strictly to the Training Split
+        if len(X_train_gen) > 0:
+            X_tr = np.vstack([X_tr_real, X_train_gen])
+            y_tr = np.concatenate([y_tr_real, y_gen_encoded])
+        else:
+            X_tr = X_tr_real
+            y_tr = y_tr_real
+
+        X_val = X_val_real
+        y_val = y_val_real
+
+        # Scaler
         scaler = Normalizer(norm='l2')
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test) 
+        # Fit the scaler ONLY on the data the model uses to train
+        X_tr = scaler.fit_transform(X_tr)
+        X_val = scaler.transform(X_val)
+        X_test_scaled = scaler.transform(X_test)
+        X_train_scaled = scaler.transform(X_train_full) 
         
         dump(scaler, scaler_file)
         dump(le, le_file)
-        
-        X_tr, X_val, y_tr, y_val = train_test_split(X_train_scaled, y_train_encoded, test_size=0.1, random_state=42, stratify=y_train_encoded)
         
         # Define DataLoaders once
         batch_size = 2048
@@ -551,6 +629,7 @@ def main():
             weight_decay = trial.suggest_float('weight_decay', 1e-5, 1e-2, log=True)
             weight_smoothing = trial.suggest_float('weight_smoothing', 0.2, 0.8)
             novel_multiplier = trial.suggest_float('novel_multiplier', 1.0, 15.0)
+            trial_novel_bias = trial.suggest_float('novel_bias', 0.0, 1.5)
 
             # Apply multiplier to the 3 SIMULATED novel classes
             smoothed_weights = np.power(full_meta_raw_weights, weight_smoothing)
@@ -623,7 +702,8 @@ def main():
                         elif DISTANCE_METRIC == 'logits':
                             scores = logits
 
-                        preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+                        preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS,
+                                            novel_idx=novel_class_idx, novel_bias=trial_novel_bias)
                         all_preds.extend(preds.cpu().numpy())
                         all_labels.extend(labels.cpu().numpy())
                 
@@ -700,6 +780,7 @@ def main():
             print(f"Found parameter: {best_params}")
         
         final_batch_size = best_params.get('batch_size', 2048)
+        final_novel_bias = best_params.get('novel_bias', 0.0)
         train_loader = DataLoader(train_dataset, batch_size=final_batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=final_batch_size, shuffle=False)
 
@@ -783,7 +864,8 @@ def main():
                     elif DISTANCE_METRIC == 'logits':
                         scores = logits
 
-                    preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+                    preds = get_predictions(scores, labels, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS, 
+                        novel_idx=novel_class_idx, novel_bias=final_novel_bias )
                     all_preds.extend(preds.cpu().numpy())
                     all_labels.extend(labels.cpu().numpy())
             
@@ -842,7 +924,8 @@ def main():
         elif DISTANCE_METRIC == 'logits':
             scores = test_logits
 
-        y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
+        y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS, 
+                                 novel_idx=novel_class_idx, novel_bias=final_novel_bias )
         y_pred_encoded = y_pred_encoded.cpu().numpy()
         X_separated_features_all = X_separated_features_all.cpu().numpy()
 
