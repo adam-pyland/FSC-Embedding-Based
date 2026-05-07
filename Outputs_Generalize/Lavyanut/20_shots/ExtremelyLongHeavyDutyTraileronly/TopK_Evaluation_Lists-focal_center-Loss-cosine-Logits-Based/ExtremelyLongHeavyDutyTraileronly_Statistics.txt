@@ -1,10 +1,7 @@
 ========================================
 PREDICTION-BASED TOP-K STATISTICS
 Target Class Evaluated: ExtremelyLongHeavyDutyTraileronly
-Prediction Mode: COSINE
 ========================================
-
-Total Validation Samples Evaluated: 858
 
 --- TOP-1 Category ---
 Total objects scored into this category: 32

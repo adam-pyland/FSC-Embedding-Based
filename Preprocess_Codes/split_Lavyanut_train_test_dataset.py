@@ -10,7 +10,7 @@ SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/"
 BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/"
 
 # The number of images to be used from the few shots novel class.
-SHOTS = 5
+SHOTS = 20
 
 # Define Target Directories
 TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "train/base_class")
@@ -393,16 +393,16 @@ if __name__ == "__main__":
     # find_mismatched_labels(label_path, image_path)
     # sanitize_filenames(SOURCE_DIR)
     # rename_classes_in_files()
-    print_actual_class_names(TRAIN_BASE_DIR)
-    print_actual_class_names(TRAIN_FORK_DIR)
-    print_actual_class_names(TRAIN_TRAIL_DIR)
-    print_actual_class_names(TEST_BASE_DIR)
-    print_actual_class_names(TEST_FORK_DIR)
-    print_actual_class_names(TEST_TRAIL_DIR)
-    print_actual_class_names(TEST_HEAVY_DIR)
+    # print_actual_class_names(TRAIN_BASE_DIR)
+    # print_actual_class_names(TRAIN_FORK_DIR)
+    # print_actual_class_names(TRAIN_TRAIL_DIR)
+    # print_actual_class_names(TEST_BASE_DIR)
+    # print_actual_class_names(TEST_FORK_DIR)
+    # print_actual_class_names(TEST_TRAIL_DIR)
+    # print_actual_class_names(TEST_HEAVY_DIR)
 
     # crops_directory = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops/"
     # output_file = "/home/adamm/Documents/FSOD/Data/Lavyanut/class_counts.txt"
 
     # count_crop_classes(crops_directory, output_file)
-    # split_dataset()
+    split_dataset()
