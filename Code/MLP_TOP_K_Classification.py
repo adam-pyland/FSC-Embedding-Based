@@ -70,7 +70,11 @@ elif TARGET_EVAL_CLASS == 'Forklifts':
     TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train/forklifts_{SHOTS}_shots/'
     VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test/novel_class_forklifts_{SHOTS}_shots/'
 else:
-    raise ValueError("Unknown target class for directories!")
+    ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
+    ALL_CLASSES.remove('Forklifts')
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train_{TARGET_EVAL_CLASS.lower()}/{TARGET_EVAL_CLASS.lower()}_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test_{TARGET_EVAL_CLASS.lower()}/novel_class_{TARGET_EVAL_CLASS.lower()}_{SHOTS}_shots/'
+    
 
 # ==========================================
 # 1. PyTorch Model Definition
@@ -196,95 +200,70 @@ def plot_ranking_evaluation(df_sorted, target_class, output_dir):
 def plot_sampled_bar_charts(df_sorted, target_class, output_dir):
     total_k = len(df_sorted)
     
-    # Define sensible business milestones 
     potential_milestones =[10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500]
-    
-    # Filter milestones strictly <= total items we actually evaluated
     selected_ks = [k for k in potential_milestones if k <= total_k]
     if total_k not in selected_ks:
         selected_ks.append(total_k)
         
-    # Ensure max 10 bars so it doesn't get cluttered (take the most relevant evenly)
     if len(selected_ks) > 10:
-        # Keep 1st, 2nd, and 8 evenly spaced from the rest up to max
         idx = np.round(np.linspace(0, len(selected_ks)-1, 10)).astype(int)
-        selected_ks = [selected_ks[i] for i in sorted(list(set(idx)))]
+        selected_ks =[selected_ks[i] for i in sorted(list(set(idx)))]
     
-    # Extract data just for these K values
     df_sampled = df_sorted[df_sorted['K'].isin(selected_ks)].copy()
     
-    x = np.arange(len(selected_ks))  # the label locations
-    width = 0.35                     # the width of the bars
+    x = np.arange(len(selected_ks)) 
+    width = 0.35                    
     
-    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle(f"Sampled Top-K Performance: {target_class}", fontsize=16, fontweight='bold')
+    fig, axs = plt.subplots(1, 3, figsize=(22, 7))
+    fig.suptitle(f"Sampled Top-K Performance: {target_class}", fontsize=18, fontweight='bold')
     
     labels =[f"Top {k}" for k in df_sampled['K']]
     
     first_k = int(df_sampled['K'].iloc[0])
     first_tp_obj = int(df_sampled['Cum_TP_obj'].iloc[0])
-    
     first_tp_img = int(df_sampled['Cum_TP_img'].iloc[0])
     first_tot_img = int(df_sampled['Cum_TP_img'].iloc[0] + df_sampled['Cum_FP_img'].iloc[0])
 
     obj_title = (f"1. Cumulative Objects Evaluated\n"
-                 f"Example: To go over the first {first_tp_obj} true objects, it's needed to go through {first_k} total objects.")
+                 f"Example: To go over the first {first_tp_obj} true objects,\nit's needed to go through {first_k} total objects.")
     
-    img_title = (f"3. Cumulative Unique Images Opened\n"
-                 f"Example: To find {first_tp_img} images containing true targets, it's needed to open {first_tot_img} total images.")
-
+    img_title = (f"2. Cumulative Unique Images\n"
+                 f"Example: To find {first_tp_img} images containing true targets,\nit's needed to open {first_tot_img} total images.")
 
     # --- 1. Objects TP/FP Grouped Bar ---
-    axs[0, 0].bar(x - width/2, df_sampled['Cum_TP_obj'], width, label='TP Objects', color='forestgreen')
-    axs[0, 0].bar(x + width/2, df_sampled['Cum_FP_obj'], width, label='FP Objects', color='lightcoral')
-    axs[0, 0].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[0, 0].set_xticks(x)
-    axs[0, 0].set_xticklabels(labels, rotation=45)
-    axs[0, 0].set_ylabel("Total Object Count")
-    axs[0, 0].legend()
-    # Add actual numbers on top of bars
+    axs[0].bar(x - width/2, df_sampled['Cum_TP_obj'], width, label='TP Objects', color='forestgreen')
+    axs[0].bar(x + width/2, df_sampled['Cum_FP_obj'], width, label='FP Objects', color='lightcoral')
+    axs[0].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
+    axs[0].set_xticks(x)
+    axs[0].set_xticklabels(labels, rotation=45)
+    axs[0].set_ylabel("Total Object Count")
+    axs[0].legend()
     for i, (tp, fp) in enumerate(zip(df_sampled['Cum_TP_obj'], df_sampled['Cum_FP_obj'])):
-        axs[0, 0].text(i - width/2, tp + (tp*0.02), str(int(tp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkgreen')
-        axs[0, 0].text(i + width/2, fp + (fp*0.02), str(int(fp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkred')
+        axs[0].text(i - width/2, tp + (tp*0.02), str(int(tp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkgreen')
+        axs[0].text(i + width/2, fp + (fp*0.02), str(int(fp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkred')
 
-    
-    # --- 2. Object Precision Bar ---
-    prec_obj = df_sampled['Precision_obj_at_K'] * 100
-    axs[0, 1].bar(x, prec_obj, width=0.5, label='Precision (%)', color='royalblue')
-    axs[0, 1].set_title("2. Object Precision at Rank K")
-    axs[0, 1].set_xticks(x)
-    axs[0, 1].set_xticklabels(labels, rotation=45)
-    axs[0, 1].set_ylabel("Precision (%)")
-    axs[0, 1].set_ylim(0, 115) 
-    for i, p in enumerate(prec_obj):
-        axs[0, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
-
-
-    
-
-    # --- 3. Images TP/FP Grouped Bar ---
-    axs[1, 0].bar(x - width/2, df_sampled['Cum_TP_img'], width, label='TP Images', color='forestgreen')
-    axs[1, 0].bar(x + width/2, df_sampled['Cum_FP_img'], width, label='FP Images (No TP)', color='lightcoral')
-    axs[1, 0].set_title(img_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[1, 0].set_xticks(x)
-    axs[1, 0].set_xticklabels(labels, rotation=45)
-    axs[1, 0].set_ylabel("Total Unique Images")
-    axs[1, 0].legend()
+    # --- 2. Images TP/FP Grouped Bar ---
+    axs[1].bar(x - width/2, df_sampled['Cum_TP_img'], width, label='TP Images', color='forestgreen')
+    axs[1].bar(x + width/2, df_sampled['Cum_FP_img'], width, label='FP Images (No TP)', color='lightcoral')
+    axs[1].set_title(img_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
+    axs[1].set_xticks(x)
+    axs[1].set_xticklabels(labels, rotation=45)
+    axs[1].set_ylabel("Total Unique Images")
+    axs[1].legend()
     for i, (tp, fp) in enumerate(zip(df_sampled['Cum_TP_img'], df_sampled['Cum_FP_img'])):
-        axs[1, 0].text(i - width/2, tp + (tp*0.02), str(int(tp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkgreen')
-        axs[1, 0].text(i + width/2, fp + (fp*0.02), str(int(fp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkred')
-
+        axs[1].text(i - width/2, tp + (tp*0.02), str(int(tp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkgreen')
+        axs[1].text(i + width/2, fp + (fp*0.02), str(int(fp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkred')
     
-    # --- 4. Images Precision Bar ---
+    # --- 3. Images Precision Bar ---
     prec_img = df_sampled['Precision_img_at_K'] * 100
-    axs[1, 1].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple')
-    axs[1, 1].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[1, 1].set_xticks(x)
-    axs[1, 1].set_xticklabels(labels, rotation=45)
-    axs[1, 1].set_ylabel("Precision (%)")
-    axs[1, 1].set_ylim(0, 115)
+    axs[2].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple')
+    axs[2].set_title("3. Image Precision (Percentage of Useful Images)", fontsize=13, pad=10)
+    axs[2].set_xticks(x)
+    axs[2].set_xticklabels(labels, rotation=45)
+    axs[2].set_ylabel("Precision (%)")
+    axs[2].set_ylim(0, 115)
     for i, p in enumerate(prec_img):
-        axs[1, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        axs[2].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
@@ -293,127 +272,96 @@ def plot_sampled_bar_charts(df_sorted, target_class, output_dir):
     print(f"Saved Sampled Bar Charts to: {plot_path}")
 
 
-
 def plot_sampled_bar_charts_Out_of_Total(df_sorted, target_class, output_dir):
     total_k = len(df_sorted)
     
-    # Define sensible business milestones 
     potential_milestones =[10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500]
-    
-    # Filter milestones strictly <= total items we actually evaluated
     selected_ks = [k for k in potential_milestones if k <= total_k]
     if total_k not in selected_ks:
         selected_ks.append(total_k)
         
-    # Ensure max 10 bars so it doesn't get cluttered
     if len(selected_ks) > 10:
         idx = np.round(np.linspace(0, len(selected_ks)-1, 10)).astype(int)
         selected_ks = [selected_ks[i] for i in sorted(list(set(idx)))]
     
     df_sampled = df_sorted[df_sorted['K'].isin(selected_ks)].copy()
     
-    x = np.arange(len(selected_ks))  # the label locations
-    width = 0.55                     # slightly wider for stacked bars
+    x = np.arange(len(selected_ks))  
+    width = 0.55                     
     
-    fig, axs = plt.subplots(2, 2, figsize=(18, 14))
+    fig, axs = plt.subplots(1, 3, figsize=(22, 7))
     fig.suptitle(f"Effort vs. Reward Performance: {target_class}", fontsize=18, fontweight='bold')
     
     labels_x =[f"Top {k}" for k in df_sampled['K']]
     
-    # --- Dynamically generate the explanatory text for the titles ---
     first_k = int(df_sampled['K'].iloc[0])
     first_tp_obj = int(df_sampled['Cum_TP_obj'].iloc[0])
-    
     first_tp_img = int(df_sampled['Cum_TP_img'].iloc[0])
     first_tot_img = int(df_sampled['Cum_TP_img'].iloc[0] + df_sampled['Cum_FP_img'].iloc[0])
 
     obj_title = (f"1. Cumulative Objects Evaluated\n"
                  f"Example: To go over the first {first_tp_obj} true objects, it's needed to go through {first_k} total objects.")
     
-    img_title = (f"3. Cumulative Unique Images Opened\n"
+    img_title = (f"2. Cumulative Unique Images Opened\n"
                  f"Example: To find {first_tp_img} images containing true targets, it's needed to open {first_tot_img} total images.")
 
     # ==========================================
     # 1. Objects TP/FP STACKED Bar
     # ==========================================
-    axs[0, 0].bar(x, df_sampled['Cum_TP_obj'], width, label='Found True Targets (TP)', color='forestgreen', edgecolor='black')
-    axs[0, 0].bar(x, df_sampled['Cum_FP_obj'], width, bottom=df_sampled['Cum_TP_obj'], label='Wasted Effort (FP)', color='lightcoral', edgecolor='black')
+    axs[0].bar(x, df_sampled['Cum_TP_obj'], width, label='Found True Targets (TP)', color='forestgreen', edgecolor='black')
+    axs[0].bar(x, df_sampled['Cum_FP_obj'], width, bottom=df_sampled['Cum_TP_obj'], label='Wasted Effort (FP)', color='lightcoral', edgecolor='black')
     
-    axs[0, 0].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[0, 0].set_xticks(x)
-    axs[0, 0].set_xticklabels(labels_x, rotation=45)
-    axs[0, 0].set_ylabel("Total Objects Evaluated")
-    axs[0, 0].legend(loc='upper left')
+    axs[0].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
+    axs[0].set_xticks(x)
+    axs[0].set_xticklabels(labels_x, rotation=45)
+    axs[0].set_ylabel("Total Objects Evaluated")
+    axs[0].legend(loc='upper left')
     
     max_y_obj = df_sampled['K'].max()
     for i, (tp, fp, k) in enumerate(zip(df_sampled['Cum_TP_obj'], df_sampled['Cum_FP_obj'], df_sampled['K'])):
-        # Write only the Total integer on top
-        axs[0, 0].text(i, k + (max_y_obj * 0.02), f"{int(k)}", ha='center', va='bottom', fontsize=11, fontweight='bold')
-        
-        # Write TP inside green (only if the segment is physically tall enough > 4% of graph)
+        axs[0].text(i, k + (max_y_obj * 0.02), f"{int(k)}", ha='center', va='bottom', fontsize=11, fontweight='bold')
         if tp > max_y_obj * 0.04: 
-            axs[0, 0].text(i, tp / 2, f"{int(tp)}", ha='center', va='center', color='white', fontweight='bold', fontsize=10)
-            
-        # Write FP inside red (only if the segment is physically tall enough > 4% of graph)
+            axs[0].text(i, tp / 2, f"{int(tp)}", ha='center', va='center', color='white', fontweight='bold', fontsize=10)
         if fp > max_y_obj * 0.04:
-            axs[0, 0].text(i, tp + (fp / 2), f"{int(fp)}", ha='center', va='center', color='darkred', fontweight='bold', fontsize=10)
+            axs[0].text(i, tp + (fp / 2), f"{int(fp)}", ha='center', va='center', color='darkred', fontweight='bold', fontsize=10)
 
     # ==========================================
-    # 2. Object Precision Bar
+    # 2. Images TP/FP STACKED Bar
     # ==========================================
-    prec_obj = df_sampled['Precision_obj_at_K'] * 100
-    axs[0, 1].bar(x, prec_obj, width=0.5, label='Precision (%)', color='royalblue', edgecolor='black')
-    axs[0, 1].set_title("2. Object Precision (Percentage of Useful Targets)", fontsize=13, pad=10)
-    axs[0, 1].set_xticks(x)
-    axs[0, 1].set_xticklabels(labels_x, rotation=45)
-    axs[0, 1].set_ylabel("Precision (%)")
-    axs[0, 1].set_ylim(0, 115) 
-    for i, p in enumerate(prec_obj):
-        axs[0, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
-
-    # ==========================================
-    # 3. Images TP/FP STACKED Bar
-    # ==========================================
-    axs[1, 0].bar(x, df_sampled['Cum_TP_img'], width, label='Images containing Targets', color='forestgreen', edgecolor='black')
-    axs[1, 0].bar(x, df_sampled['Cum_FP_img'], width, bottom=df_sampled['Cum_TP_img'], label='Wasted Images (No Targets)', color='lightcoral', edgecolor='black')
+    axs[1].bar(x, df_sampled['Cum_TP_img'], width, label='Images containing Targets', color='forestgreen', edgecolor='black')
+    axs[1].bar(x, df_sampled['Cum_FP_img'], width, bottom=df_sampled['Cum_TP_img'], label='Wasted Images (No Targets)', color='lightcoral', edgecolor='black')
     
-    axs[1, 0].set_title(img_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[1, 0].set_xticks(x)
-    axs[1, 0].set_xticklabels(labels_x, rotation=45)
-    axs[1, 0].set_ylabel("Total Unique Images")
-    axs[1, 0].legend(loc='upper left')
+    axs[1].set_title(img_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
+    axs[1].set_xticks(x)
+    axs[1].set_xticklabels(labels_x, rotation=45)
+    axs[1].set_ylabel("Total Unique Images")
+    axs[1].legend(loc='upper left')
     
     max_y_img = max(df_sampled['Cum_TP_img'] + df_sampled['Cum_FP_img'])
     for i, (tp, fp) in enumerate(zip(df_sampled['Cum_TP_img'], df_sampled['Cum_FP_img'])):
         tot_img = int(tp + fp)
-        
-        # Write only the Total integer on top
-        axs[1, 0].text(i, tot_img + (max_y_img * 0.02), f"{tot_img}", ha='center', va='bottom', fontsize=11, fontweight='bold')
-        
-        # Write TP inside green
+        axs[1].text(i, tot_img + (max_y_img * 0.02), f"{tot_img}", ha='center', va='bottom', fontsize=11, fontweight='bold')
         if tp > max_y_img * 0.04:
-            axs[1, 0].text(i, tp / 2, f"{int(tp)}", ha='center', va='center', color='white', fontweight='bold', fontsize=10)
-            
-        # Write FP inside red
+            axs[1].text(i, tp / 2, f"{int(tp)}", ha='center', va='center', color='white', fontweight='bold', fontsize=10)
         if fp > max_y_img * 0.04:
-            axs[1, 0].text(i, tp + (fp / 2), f"{int(fp)}", ha='center', va='center', color='darkred', fontweight='bold', fontsize=10)
+            axs[1].text(i, tp + (fp / 2), f"{int(fp)}", ha='center', va='center', color='darkred', fontweight='bold', fontsize=10)
 
     # ==========================================
-    # 4. Images Precision Bar
+    # 3. Images Precision Bar
     # ==========================================
     prec_img = df_sampled['Precision_img_at_K'] * 100
-    axs[1, 1].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple', edgecolor='black')
-    axs[1, 1].set_title("4. Image Precision (Percentage of Useful Images)", fontsize=13, pad=10)
-    axs[1, 1].set_xticks(x)
-    axs[1, 1].set_xticklabels(labels_x, rotation=45)
-    axs[1, 1].set_ylabel("Precision (%)")
-    axs[1, 1].set_ylim(0, 115)
+    axs[2].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple', edgecolor='black')
+    axs[2].set_title("3. Image Precision (Percentage of Useful Images)", fontsize=13, pad=10)
+    axs[2].set_xticks(x)
+    axs[2].set_xticklabels(labels_x, rotation=45)
+    axs[2].set_ylabel("Precision (%)")
+    axs[2].set_ylim(0, 115)
     for i, p in enumerate(prec_img):
-        axs[1, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        axs[2].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
-    plot_path = os.path.join(output_dir, f"{target_class}_Sampled_Bar_Charts.png")
+    plot_path = os.path.join(output_dir, f"{target_class}_Sampled_Bar_Charts_Out_of_Total.png")
     plt.savefig(plot_path, dpi=300)
     print(f"Saved Manager-Friendly Stacked Bar Charts to: {plot_path}")
 
@@ -421,113 +369,91 @@ def plot_sampled_bar_charts_Out_of_Total(df_sorted, target_class, output_dir):
 def plot_sampled_bar_charts_Next_To_Total(df_sorted, target_class, output_dir):
     total_k = len(df_sorted)
     
-    # Define sensible business milestones 
     potential_milestones =[10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500]
-    
-    # Filter milestones strictly <= total items we actually evaluated
     selected_ks = [k for k in potential_milestones if k <= total_k]
     if total_k not in selected_ks:
         selected_ks.append(total_k)
         
-    # Ensure max 10 bars so it doesn't get cluttered
     if len(selected_ks) > 10:
         idx = np.round(np.linspace(0, len(selected_ks)-1, 10)).astype(int)
-        selected_ks = [selected_ks[i] for i in sorted(list(set(idx)))]
+        selected_ks =[selected_ks[i] for i in sorted(list(set(idx)))]
     
     df_sampled = df_sorted[df_sorted['K'].isin(selected_ks)].copy()
     
-    x = np.arange(len(selected_ks))  # the label locations
-    width = 0.35                     # thinner width for side-by-side bars
+    x = np.arange(len(selected_ks))  
+    width = 0.35                     
     
-    fig, axs = plt.subplots(2, 2, figsize=(18, 14))
+    fig, axs = plt.subplots(1, 3, figsize=(22, 7))
     fig.suptitle(f"Effort vs. Reward Performance: {target_class}", fontsize=18, fontweight='bold')
     
     labels_x =[f"Top {k}" for k in df_sampled['K']]
     
-    # --- Dynamically generate the explanatory text for the titles ---
     first_k = int(df_sampled['K'].iloc[0])
     first_tp_obj = int(df_sampled['Cum_TP_obj'].iloc[0])
-    
     first_tp_img = int(df_sampled['Cum_TP_img'].iloc[0])
     first_tot_img = int(df_sampled['Cum_TP_img'].iloc[0] + df_sampled['Cum_FP_img'].iloc[0])
 
     obj_title = (f"1. Cumulative Objects Evaluated\n"
                  f"Example: To go over the first {first_tp_obj} true objects, it's needed to go through {first_k} total objects.")
     
-    img_title = (f"3. Cumulative Unique Images Opened\n"
+    img_title = (f"2. Cumulative Unique Images Opened\n"
                  f"Example: To find {first_tp_img} images containing true targets, it's needed to open {first_tot_img} total images.")
 
     # ==========================================
     # 1. Objects Grouped Bar: TP vs Total
     # ==========================================
-    axs[0, 0].bar(x - width/2, df_sampled['Cum_TP_obj'], width, label='Found True Targets (TP)', color='forestgreen', edgecolor='black')
-    axs[0, 0].bar(x + width/2, df_sampled['K'], width, label='Total Objects Evaluated', color='lightslategray', edgecolor='black')
+    axs[0].bar(x - width/2, df_sampled['Cum_TP_obj'], width, label='Found True Targets (TP)', color='forestgreen', edgecolor='black')
+    axs[0].bar(x + width/2, df_sampled['K'], width, label='Total Objects Evaluated', color='lightslategray', edgecolor='black')
     
-    axs[0, 0].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[0, 0].set_xticks(x)
-    axs[0, 0].set_xticklabels(labels_x, rotation=45)
-    axs[0, 0].set_ylabel("Total Objects Evaluated")
-    axs[0, 0].legend(loc='upper left')
+    axs[0].set_title(obj_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
+    axs[0].set_xticks(x)
+    axs[0].set_xticklabels(labels_x, rotation=45)
+    axs[0].set_ylabel("Total Objects Evaluated")
+    axs[0].legend(loc='upper left')
     
     max_y_obj = df_sampled['K'].max()
     for i, (tp, k) in enumerate(zip(df_sampled['Cum_TP_obj'], df_sampled['K'])):
-        # Write TP number above the green bar
-        axs[0, 0].text(i - width/2, tp + (max_y_obj * 0.02), f"{int(tp)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='darkgreen')
-        # Write Total number above the gray bar
-        axs[0, 0].text(i + width/2, k + (max_y_obj * 0.02), f"{int(k)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='black')
+        axs[0].text(i - width/2, tp + (max_y_obj * 0.02), f"{int(tp)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='darkgreen')
+        axs[0].text(i + width/2, k + (max_y_obj * 0.02), f"{int(k)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='black')
 
     # ==========================================
-    # 2. Object Precision Bar
-    # ==========================================
-    prec_obj = df_sampled['Precision_obj_at_K'] * 100
-    axs[0, 1].bar(x, prec_obj, width=0.5, label='Precision (%)', color='royalblue', edgecolor='black')
-    axs[0, 1].set_title("2. Object Precision (Percentage of Useful Targets)", fontsize=13, pad=10)
-    axs[0, 1].set_xticks(x)
-    axs[0, 1].set_xticklabels(labels_x, rotation=45)
-    axs[0, 1].set_ylabel("Precision (%)")
-    axs[0, 1].set_ylim(0, 115) 
-    for i, p in enumerate(prec_obj):
-        axs[0, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
-
-    # ==========================================
-    # 3. Images Grouped Bar: TP vs Total
+    # 2. Images Grouped Bar: TP vs Total
     # ==========================================
     tot_imgs = df_sampled['Cum_TP_img'] + df_sampled['Cum_FP_img']
     
-    axs[1, 0].bar(x - width/2, df_sampled['Cum_TP_img'], width, label='Images containing Targets', color='forestgreen', edgecolor='black')
-    axs[1, 0].bar(x + width/2, tot_imgs, width, label='Total Images Opened', color='lightslategray', edgecolor='black')
+    axs[1].bar(x - width/2, df_sampled['Cum_TP_img'], width, label='Images containing Targets', color='forestgreen', edgecolor='black')
+    axs[1].bar(x + width/2, tot_imgs, width, label='Total Images Opened', color='lightslategray', edgecolor='black')
     
-    axs[1, 0].set_title(img_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
-    axs[1, 0].set_xticks(x)
-    axs[1, 0].set_xticklabels(labels_x, rotation=45)
-    axs[1, 0].set_ylabel("Total Unique Images")
-    axs[1, 0].legend(loc='upper left')
+    axs[1].set_title(img_title, fontsize=12, pad=10, color='#333333', fontweight='bold')
+    axs[1].set_xticks(x)
+    axs[1].set_xticklabels(labels_x, rotation=45)
+    axs[1].set_ylabel("Total Unique Images")
+    axs[1].legend(loc='upper left')
     
     max_y_img = tot_imgs.max()
     for i, (tp, tot) in enumerate(zip(df_sampled['Cum_TP_img'], tot_imgs)):
-        # Write TP number above the green bar
-        axs[1, 0].text(i - width/2, tp + (max_y_img * 0.02), f"{int(tp)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='darkgreen')
-        # Write Total number above the gray bar
-        axs[1, 0].text(i + width/2, tot + (max_y_img * 0.02), f"{int(tot)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='black')
+        axs[1].text(i - width/2, tp + (max_y_img * 0.02), f"{int(tp)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='darkgreen')
+        axs[1].text(i + width/2, tot + (max_y_img * 0.02), f"{int(tot)}", ha='center', va='bottom', fontsize=11, fontweight='bold', color='black')
 
     # ==========================================
-    # 4. Images Precision Bar
+    # 3. Images Precision Bar
     # ==========================================
     prec_img = df_sampled['Precision_img_at_K'] * 100
-    axs[1, 1].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple', edgecolor='black')
-    axs[1, 1].set_title("4. Image Precision (Percentage of Useful Images)", fontsize=13, pad=10)
-    axs[1, 1].set_xticks(x)
-    axs[1, 1].set_xticklabels(labels_x, rotation=45)
-    axs[1, 1].set_ylabel("Precision (%)")
-    axs[1, 1].set_ylim(0, 115)
+    axs[2].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple', edgecolor='black')
+    axs[2].set_title("3. Image Precision (Percentage of Useful Images)", fontsize=13, pad=10)
+    axs[2].set_xticks(x)
+    axs[2].set_xticklabels(labels_x, rotation=45)
+    axs[2].set_ylabel("Precision (%)")
+    axs[2].set_ylim(0, 115)
     for i, p in enumerate(prec_img):
-        axs[1, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        axs[2].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
-    plot_path = os.path.join(output_dir, f"{target_class}_Sampled_Bar_Charts.png")
+    plot_path = os.path.join(output_dir, f"{target_class}_Sampled_Bar_Charts_Next_To_Total.png")
     plt.savefig(plot_path, dpi=300)
     print(f"Saved Manager-Friendly Side-by-Side Bar Charts to: {plot_path}")
+    
 # ==========================================
 # 3. Main Evaluation Pipeline
 # ==========================================
@@ -736,9 +662,9 @@ def main():
 
     # --- Generate Visualizations requested by the boss ---
     plot_ranking_evaluation(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
-    # plot_sampled_bar_charts(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
+    plot_sampled_bar_charts(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
     # plot_sampled_bar_charts_Out_of_Total(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
-    plot_sampled_bar_charts_Next_To_Total(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
+    # plot_sampled_bar_charts_Next_To_Total(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
     
     # Save a CSV of the data we plotted 
     csv_path = os.path.join(OUTPUT_DIR, f"{prefix}Ranking_Data.csv")

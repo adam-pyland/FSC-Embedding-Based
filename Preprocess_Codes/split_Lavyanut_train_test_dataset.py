@@ -12,15 +12,17 @@ BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/"
 # The number of images to be used from the few shots novel class.
 SHOTS = 20
 
-# Define Target Directories
-TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "train_cementmixertrucks/base_class")
-TRAIN_CEMENT_DIR = os.path.join(BASE_OUTPUT_DIR, f"train_cementmixertrucks/cementmixertrucks_{SHOTS}_shots")
-
-TEST_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "test_cementmixertrucks/base_class")
-TEST_CEMENT_DIR = os.path.join(BASE_OUTPUT_DIR, f"test_cementmixertrucks/novel_class_cementmixertrucks_{SHOTS}_shots")
-
 # Sanitized Novel Class Name (after spaces, commas, and hyphens are removed)
-NOVEL_CEMENT = "CementMixerTrucks"
+NOVEL_CEMENT = "HeavyDuty"
+
+# Define Target Directories
+TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, f"train_{NOVEL_CEMENT}/base_class")
+TRAIN_CEMENT_DIR = os.path.join(BASE_OUTPUT_DIR, f"train_{NOVEL_CEMENT}/{NOVEL_CEMENT}_{SHOTS}_shots")
+
+TEST_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, f"test_{NOVEL_CEMENT}/base_class")
+TEST_CEMENT_DIR = os.path.join(BASE_OUTPUT_DIR, f"test_{NOVEL_CEMENT}/novel_class_{NOVEL_CEMENT}_{SHOTS}_shots")
+
+
 
 # Excluded classes sanitized
 EXCLUDED_CLASSES =[
