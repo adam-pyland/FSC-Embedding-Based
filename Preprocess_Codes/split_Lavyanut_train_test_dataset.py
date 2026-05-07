@@ -6,33 +6,29 @@ import random
 from collections import Counter
 
 # ================= Paths & Settings =================
-SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/"
-BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/"
+SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/All_Embs/"
+BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/"
 
 # The number of images to be used from the few shots novel class.
 SHOTS = 20
 
 # Define Target Directories
-TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "train/base_class")
-TRAIN_FORK_DIR = os.path.join(BASE_OUTPUT_DIR, f"train/forklifts_{SHOTS}_shots")
-TRAIN_TRAIL_DIR = os.path.join(BASE_OUTPUT_DIR, f"train/trailer_{SHOTS}_shots")
-TRAIN_HEAVY_DIR = os.path.join(BASE_OUTPUT_DIR, f"train/heavyduty_{SHOTS}_shots")
+TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "train_cementmixertrucks/base_class")
+TRAIN_CEMENT_DIR = os.path.join(BASE_OUTPUT_DIR, f"train_cementmixertrucks/cementmixertrucks_{SHOTS}_shots")
 
-TEST_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "test/base_class")
-TEST_FORK_DIR = os.path.join(BASE_OUTPUT_DIR, f"test/novel_class_forklifts_{SHOTS}_shots")
-TEST_TRAIL_DIR = os.path.join(BASE_OUTPUT_DIR, f"test/novel_class_trailer_{SHOTS}_shots")
-TEST_HEAVY_DIR = os.path.join(BASE_OUTPUT_DIR, f"test/novel_class_heavyduty_{SHOTS}_shots")
+TEST_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, "test_cementmixertrucks/base_class")
+TEST_CEMENT_DIR = os.path.join(BASE_OUTPUT_DIR, f"test_cementmixertrucks/novel_class_cementmixertrucks_{SHOTS}_shots")
 
-# Sanitized Novel Class Names (after spaces, commas, and hyphens are removed)
-NOVEL_FORKLIFT = "Forklifts"
-NOVEL_TRAILER = "ExtremelyLongHeavyDutyTraileronly"
-NOVEL_HEAVYDUTY = "ExtremelyLongHeavyDuty"
+# Sanitized Novel Class Name (after spaces, commas, and hyphens are removed)
+NOVEL_CEMENT = "CementMixerTrucks"
 
-
-# Previously mentioned excluded classes (<100 objects) sanitized
-EXCLUDED_CLASSES =["HeavyDutyTractorTruck"]
-
-
+# Excluded classes sanitized
+EXCLUDED_CLASSES =[
+    "MobileCranes", 
+    "ExtremelyLongHeavyDuty", 
+    "Traileronly", 
+    "HeavyDutyTractorTruck"
+]
 
 random.seed(42) # For reproducible splits
 
@@ -77,9 +73,9 @@ def sanitize_filenames(directory):
 
 # ================= 2. Split Function =================
 def split_dataset():
-    # Create all target directories (Added HEAVY dirs)
-    for d in[TRAIN_BASE_DIR, TRAIN_FORK_DIR, TRAIN_TRAIL_DIR, TRAIN_HEAVY_DIR, 
-              TEST_BASE_DIR, TEST_FORK_DIR, TEST_TRAIL_DIR, TEST_HEAVY_DIR]:
+    # Create all target directories
+    for d in[TRAIN_BASE_DIR, TRAIN_CEMENT_DIR, 
+              TEST_BASE_DIR, TEST_CEMENT_DIR]:
         if os.path.exists(d):
             shutil.rmtree(d)
         os.makedirs(d, exist_ok=True)
@@ -107,16 +103,12 @@ def split_dataset():
         if class_name in EXCLUDED_CLASSES:
             continue 
             
-        # Added heavyduties to the dictionary initialization
+        # Initialize dictionary for the image if it doesn't exist yet
         if image_name not in image_catalog:
-            image_catalog[image_name] = {'forklifts':[], 'trailers':[], 'heavyduties':[], 'base':[]}
+            image_catalog[image_name] = {'cement': [], 'base':[]}
             
-        if class_name == NOVEL_FORKLIFT:
-            image_catalog[image_name]['forklifts'].append(filepath)
-        elif class_name == NOVEL_TRAILER:
-            image_catalog[image_name]['trailers'].append(filepath)
-        elif class_name == NOVEL_HEAVYDUTY: # NEW
-            image_catalog[image_name]['heavyduties'].append(filepath)
+        if class_name == NOVEL_CEMENT:
+            image_catalog[image_name]['cement'].append(filepath)
         else:
             image_catalog[image_name]['base'].append(filepath)
             total_base_objects += 1
@@ -125,75 +117,36 @@ def split_dataset():
     train_images = set()
     test_images = set()
     
-    train_fork_cnt, train_trail_cnt, train_heavy_cnt, train_base_cnt = 0, 0, 0, 0
+    train_cement_cnt, train_base_cnt = 0, 0
     target_base_train = int(0.8 * total_base_objects)
 
-    fork_images =[img for img, data in image_catalog.items() if len(data['forklifts']) > 0]
-    trail_images = [img for img, data in image_catalog.items() if len(data['trailers']) > 0]
-    heavy_images =[img for img, data in image_catalog.items() if len(data['heavyduties']) > 0] # NEW
+    cement_images = [img for img, data in image_catalog.items() if len(data['cement']) > 0]
 
     # Helper function to update counters
     def update_train_counters(img_name):
-        nonlocal train_fork_cnt, train_trail_cnt, train_heavy_cnt, train_base_cnt
-        train_fork_cnt += len(image_catalog[img_name]['forklifts'])
-        train_trail_cnt += len(image_catalog[img_name]['trailers'])
-        train_heavy_cnt += len(image_catalog[img_name]['heavyduties'])
+        nonlocal train_cement_cnt, train_base_cnt
+        train_cement_cnt += len(image_catalog[img_name]['cement'])
         train_base_cnt += len(image_catalog[img_name]['base'])
 
-    # 1. Grab images containing Forklifts
-    for img in fork_images:
-        if train_fork_cnt < 20:
+    # 1. Grab images containing Cement Mixer Trucks
+    for img in cement_images:
+        if train_cement_cnt < 20: # Ensure we grab enough images to comfortably provide 'SHOTS'
             if img not in train_images:
-                unassigned_forks =[i for i in fork_images if i not in train_images]
-                unassigned_trails =[i for i in trail_images if i not in train_images]
-                unassigned_heavys =[i for i in heavy_images if i not in train_images]
+                unassigned_cements =[i for i in cement_images if i not in train_images]
                 
-                if len(unassigned_forks) <= 1: break
-                if img in trail_images and len(unassigned_trails) <= 1: continue
-                if img in heavy_images and len(unassigned_heavys) <= 1: continue # NEW
+                # Leave at least one image with the novel class for the testing set
+                if len(unassigned_cements) <= 1: break
 
                 train_images.add(img)
                 update_train_counters(img)
 
-    # 2. Grab images containing Trailers
-    for img in trail_images:
-        if train_trail_cnt < 20:
-            if img not in train_images:
-                unassigned_forks = [i for i in fork_images if i not in train_images]
-                unassigned_trails = [i for i in trail_images if i not in train_images]
-                unassigned_heavys = [i for i in heavy_images if i not in train_images]
-                
-                if len(unassigned_trails) <= 1: break
-                if img in fork_images and len(unassigned_forks) <= 1: continue
-                if img in heavy_images and len(unassigned_heavys) <= 1: continue # NEW
-
-                train_images.add(img)
-                update_train_counters(img)
-
-    # 3. Grab images containing HeavyDuty (NEW)
-    for img in heavy_images:
-        if train_heavy_cnt < 20:
-            if img not in train_images:
-                unassigned_forks =[i for i in fork_images if i not in train_images]
-                unassigned_trails =[i for i in trail_images if i not in train_images]
-                unassigned_heavys =[i for i in heavy_images if i not in train_images]
-                
-                if len(unassigned_heavys) <= 1: break
-                if img in fork_images and len(unassigned_forks) <= 1: continue
-                if img in trail_images and len(unassigned_trails) <= 1: continue
-
-                train_images.add(img)
-                update_train_counters(img)
-
-    # 4. Fill the rest of the Train set with Base images
+    # 2. Fill the rest of the Train set with Base images
     remaining_images =[img for img in image_catalog.keys() if img not in train_images]
     random.shuffle(remaining_images)
     
     for img in remaining_images:
-        # STRICT PROTECTION: Expanded to include heavyduties
-        if (len(image_catalog[img]['forklifts']) > 0 or 
-            len(image_catalog[img]['trailers']) > 0 or 
-            len(image_catalog[img]['heavyduties']) > 0):
+        # STRICT PROTECTION: Any remaining image containing novel objects MUST go to test
+        if len(image_catalog[img]['cement']) > 0:
             test_images.add(img)
             continue
             
@@ -205,44 +158,28 @@ def split_dataset():
 
     # --- Step B: Copy Files to Destinations ---
     print("Copying files to train and test directories...")
-    copied_train_fork, copied_train_trail, copied_train_heavy = 0, 0, 0
+    copied_train_cement = 0
     
     for img, data in image_catalog.items():
         if img in train_images:
             # Copy exactly SHOTS
-            for f in data['forklifts']:
-                if copied_train_fork < SHOTS:
-                    shutil.copy(f, TRAIN_FORK_DIR)
-                    copied_train_fork += 1
-            
-            for f in data['trailers']:
-                if copied_train_trail < SHOTS:
-                    shutil.copy(f, TRAIN_TRAIL_DIR)
-                    copied_train_trail += 1
-                    
-            for f in data['heavyduties']: # NEW
-                if copied_train_heavy < SHOTS:
-                    shutil.copy(f, TRAIN_HEAVY_DIR)
-                    copied_train_heavy += 1
+            for f in data['cement']:
+                if copied_train_cement < SHOTS:
+                    shutil.copy(f, TRAIN_CEMENT_DIR)
+                    copied_train_cement += 1
                     
             # Copy base
             for f in data['base']:
                 shutil.copy(f, TRAIN_BASE_DIR)
 
         elif img in test_images:
-            for f in data['forklifts']:
-                shutil.copy(f, TEST_FORK_DIR)
-            for f in data['trailers']:
-                shutil.copy(f, TEST_TRAIL_DIR)
-            for f in data['heavyduties']: # NEW
-                shutil.copy(f, TEST_HEAVY_DIR)
+            for f in data['cement']:
+                shutil.copy(f, TEST_CEMENT_DIR)
             for f in data['base']:
                 shutil.copy(f, TEST_BASE_DIR)
 
     print("Done! Dataset successfully split at the image-level without data leakage.")
-    print(f"  - Train Forklifts: {copied_train_fork} objects")
-    print(f"  - Train Trailers: {copied_train_trail} objects")
-    print(f"  - Train HeavyDuty: {copied_train_heavy} objects")
+    print(f"  - Train Cement Mixer Trucks: {copied_train_cement} objects")
     print(f"  - Train Base: ~80% of data")
     print(f"  - Test data isolated to unique images.")
 
