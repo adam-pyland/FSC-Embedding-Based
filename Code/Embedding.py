@@ -6,6 +6,7 @@ import numpy as np
 import torchvision.transforms.functional as TF
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
+import time
 
 # -------------------------------------------------------------------------
 # 1. Padding Class
@@ -65,9 +66,11 @@ class SatelliteCropDataset(Dataset):
 # 3. Main Processing Function
 # -------------------------------------------------------------------------
 def main():
-    input_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops/'
-    output_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs/All_Embs/'
-    checkpoint_path = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/models/dinov3_vitl16_pretrain_sat493m-eadcf0ff.pth'
+    input_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/TEMP/OBJ_Crops/'
+    output_dir = '/home/adamm/Documents/FSOD/Data/Lavyanut/TEMP/OBJ_Embs/'
+    checkpoint_path = '/home/adamm/Documents/FSOD/codes/FSC-Embedding-Based-Satellites/FSC-Embedding-Based-Satellites/Models_old_Dataset/models/dinov3_vitl16_pretrain_sat493m-eadcf0ff.pth'
+
+    tic = time.time()
 
     # Hyperparameters for speed
     BATCH_SIZE = 128   # Increase to 128 or 256 if your GPU has a lot of VRAM
@@ -144,6 +147,9 @@ def main():
                 
                 # Save
                 np.save(save_path, single_feature_vector)
+    toc = time.time()
+    tictoc = toc - tic
+    print(f"Measured block execution time: {tictoc:.4f} seconds")
 
 if __name__ == "__main__":
     main()

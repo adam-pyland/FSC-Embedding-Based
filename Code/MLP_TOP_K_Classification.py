@@ -1,5 +1,6 @@
 import os
 import glob
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 from joblib import load
@@ -29,15 +30,15 @@ SHOTS = 20
 
 # Path to the directory where the MLP model, scaler, and label encoder are saved
 LOSS_COMBINATION = 'focal_center'
-SAVED_MODEL_DIR = f"models_Generalized_Windows/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVED_MODEL_DIR = f"models_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
 
 # Output directory for the text files
-OUTPUT_DIR = f"Outputs_Generalized_Windows/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
+OUTPUT_DIR = f"Outputs_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-ALL_CLASSES = [
+ALL_CLASSES =[
 'Bulldozers',
 'CementMixerTrucks',
 'ExtremelyLongHeavyDutyTraileronly',
@@ -51,8 +52,8 @@ ALL_CLASSES = [
 'TruckTractor'
 ]
 
-WORK_PLACE = 'yehud' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
-data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
+WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
+data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut_old' if WORK_PLACE == 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut_partial/'
 if WORK_PLACE == 'WSL':
     data_path = '/mnt/c/Adams/FSOD/Data/Lavyanut/Lavyanut'
 
@@ -151,68 +152,113 @@ def load_features_and_filenames(directory, X_list, y_list, filenames_list):
                 filenames_list.append(filename)
                 break
 
-def plot_statistics(top1_tot, top1_real, top2_tot, top2_real, top3_tot, top3_real, not3_tot, not3_real, target_class, output_dir):
+def get_image_name(filename, safe_classes):
+    """Extracts the base image name from the full object npy filename."""
+    for cls in safe_classes:
+        if f"_{cls}_" in filename:
+            return filename.split(f"_{cls}_")[0]
+    # Fallback method just in case
+    return filename.rsplit('_', 2)[0]
+
+def plot_statistics(obj_tp, obj_fp, img_tp, img_fp,
+                    g_tp_obj, g_fp_obj, g_tp_img, g_fp_img, 
+                    target_class, output_dir):
     categories =['TOP-1', 'TOP-2', 'TOP-3', 'Not in TOP-3']
     
-    totals = np.array([top1_tot, top2_tot, top3_tot, not3_tot])
-    reals = np.array([top1_real, top2_real, top3_real, not3_real])
-    falses = totals - reals
+    obj_tp = np.array(obj_tp)
+    obj_fp = np.array(obj_fp)
+    img_tp = np.array(img_tp)
+    img_fp = np.array(img_fp)
     
-    # Avoid division by zero
-    accuracies = np.divide(reals, totals, out=np.zeros_like(reals, dtype=float), where=totals!=0) * 100
+    obj_totals = obj_tp + obj_fp
+    img_totals = img_tp + img_fp
+    
+    # Calculate Percentages for 100% Stacked Bars (Ratio)
+    obj_tp_pct = np.divide(obj_tp, obj_totals, out=np.zeros_like(obj_tp, dtype=float), where=obj_totals!=0) * 100
+    obj_fp_pct = np.divide(obj_fp, obj_totals, out=np.zeros_like(obj_fp, dtype=float), where=obj_totals!=0) * 100
+    
+    img_tp_pct = np.divide(img_tp, img_totals, out=np.zeros_like(img_tp, dtype=float), where=img_totals!=0) * 100
+    img_fp_pct = np.divide(img_fp, img_totals, out=np.zeros_like(img_fp, dtype=float), where=img_totals!=0) * 100
 
-    fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+    fig, axs = plt.subplots(1, 3, figsize=(18, 6.5))
     fig.suptitle(f'Prediction-Based Top-K Evaluation: {target_class}', fontsize=16, fontweight='bold')
 
-    # --- Plot 1: Stacked Bar Chart (Counts) ---
-    axs[0].bar(categories, reals, label=f'Actual {target_class} (True)', color='forestgreen')
-    axs[0].bar(categories, falses, bottom=reals, label='Other Classes (False Alarms)', color='lightcoral')
-    axs[0].set_title('Prediction Distribution (Counts)')
-    axs[0].set_ylabel('Number of Objects')
-    axs[0].legend()
-    for i, (r, t) in enumerate(zip(reals, totals)):
-        if t > 0:
-            axs[0].text(i, t + (max(totals)*0.02), f"Total: {t}", ha='center', fontsize=10)
-            axs[0].text(i, r / 2 if r > 0 else 0, f"{r}", ha='center', color='white', fontweight='bold')
+    # --- Plot 1: Stacked Bar Chart (Object Ratios) ---
+    axs[0].bar(categories, obj_tp_pct, label='TP Objects', color='forestgreen')
+    axs[0].bar(categories, obj_fp_pct, bottom=obj_tp_pct, label='FP Objects', color='lightcoral')
+    axs[0].set_title('Object Ratio (%)\nTP vs FP')
+    axs[0].set_ylabel('Percentage')
+    axs[0].set_ylim(0, 100)
+    axs[0].legend(loc='lower left')
+    for i in range(len(categories)):
+        if obj_totals[i] > 0:
+            if obj_tp_pct[i] >= 5:
+                axs[0].text(i, obj_tp_pct[i] / 2, f"{obj_tp_pct[i]:.1f}%", ha='center', color='white', fontweight='bold')
+            if obj_fp_pct[i] >= 5:
+                axs[0].text(i, obj_tp_pct[i] + (obj_fp_pct[i] / 2), f"{obj_fp_pct[i]:.1f}%", ha='center', color='black', fontweight='bold')
 
-    # --- Plot 2: Accuracy Bar Chart ---
-    bars = axs[1].bar(categories, accuracies, color='royalblue')
-    axs[1].set_title('Accuracy within Category (%)')
-    axs[1].set_ylabel('Accuracy (%)')
+    # --- Plot 2: Stacked Bar Chart (Image Ratios) ---
+    axs[1].bar(categories, img_tp_pct, label='TP Images', color='forestgreen')
+    axs[1].bar(categories, img_fp_pct, bottom=img_tp_pct, label='FP Images', color='lightcoral')
+    axs[1].set_title('Image Ratio (%)\nTP vs FP')
+    axs[1].set_ylabel('Percentage')
     axs[1].set_ylim(0, 100)
-    for bar in bars:
-        yval = bar.get_height()
-        axs[1].text(bar.get_x() + bar.get_width()/2, yval + 1.5, f"{yval:.1f}%", ha='center', fontweight='bold')
+    axs[1].legend(loc='lower left')
+    for i in range(len(categories)):
+        if img_totals[i] > 0:
+            if img_tp_pct[i] >= 5:
+                axs[1].text(i, img_tp_pct[i] / 2, f"{img_tp_pct[i]:.1f}%", ha='center', color='white', fontweight='bold')
+            if img_fp_pct[i] >= 5:
+                axs[1].text(i, img_tp_pct[i] + (img_fp_pct[i] / 2), f"{img_fp_pct[i]:.1f}%", ha='center', color='black', fontweight='bold')
 
-    # --- Plot 3: Pie Chart (Recall/Where did the REAL objects go?) ---
-    # Only plot if there are actually real objects in that category
-    labels =[cat for cat, r in zip(categories, reals) if r > 0]
-    sizes = [r for r in reals if r > 0]
+    # --- Plot 3: Pie Chart (Test Novel Class Distribution) ---
+    labels =[cat for cat, r in zip(categories, obj_tp) if r > 0]
+    sizes = [r for r in obj_tp if r > 0]
     colors =['#ff9999','#66b3ff','#99ff99','#ffcc99'][:len(sizes)]
     
     if sum(sizes) > 0:
         axs[2].pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=140, explode=[0.05]*len(sizes))
-        axs[2].set_title(f'Where did the {sum(sizes)} actual Targets rank?')
+        axs[2].set_title('Test Novel Class Distribution to categories')
     else:
         axs[2].text(0.5, 0.5, "No Real Targets Found", ha='center', va='center')
+        axs[2].set_title('Test Novel Class Distribution to categories')
         axs[2].axis('off')
 
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.88)
+    # --- Calculate and Display Global Percentages at the Bottom ---
+    g_obj_total = g_tp_obj + g_fp_obj
+    g_img_total = g_tp_img + g_fp_img
+    
+    g_tp_obj_pct = (g_tp_obj / g_obj_total * 100) if g_obj_total > 0 else 0.0
+    g_fp_obj_pct = (g_fp_obj / g_obj_total * 100) if g_obj_total > 0 else 0.0
+    
+    g_tp_img_pct = (g_tp_img / g_img_total * 100) if g_img_total > 0 else 0.0
+    g_fp_img_pct = (g_fp_img / g_img_total * 100) if g_img_total > 0 else 0.0
+
+    # UPDATE: Changed "Overall" to "TOP-3" to accurately reflect the data
+    stats_text = (
+        f"TOP-3 Objects - TP (Target Class): {g_tp_obj_pct:.1f}% | FP (Other Classes): {g_fp_obj_pct:.1f}%\n"
+        f"TOP-3 Images - TP (Contains Target): {g_tp_img_pct:.1f}% | FP (No Target Present): {g_fp_img_pct:.1f}%"
+    )
+    
+    fig.text(0.5, 0.02, stats_text, ha='center', fontsize=13, 
+             bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray', boxstyle='round,pad=0.5'))
+
+    plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Leaves space for the bottom text
     
     # Save the plot
     plot_path = os.path.join(output_dir, f"{target_class}_Evaluation_Plots.png")
     plt.savefig(plot_path, dpi=300)
     print(f"Saved evaluation plots to: {plot_path}")
-    
-    # Uncomment the next line if you want the script to pop up the window and show the graph while running
-    # plt.show()
 
 # ==========================================
 # 3. Main Evaluation Pipeline
 # ==========================================
 
 def main():
+    
+    # --- BEGINNING OF TIMED BLOCK ---
+    start_time = time.time()
+    
     if TARGET_EVAL_CLASS is None:
         raise ValueError("TARGET_EVAL_CLASS must be specified to perform prediction-based category ranking.")
 
@@ -288,7 +334,7 @@ def main():
     with torch.no_grad():
         logits, hidden_feats = model(X_val_tensor)
         
-        if DISTANCE_METRIC in ['l2', 'cosine']:
+        if DISTANCE_METRIC in['l2', 'cosine']:
             scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
         elif DISTANCE_METRIC == 'logits':
             scores = logits
@@ -304,11 +350,11 @@ def main():
     top3_list =[]
     not_in_top3_list =[]
 
-    # Track how many objects inside those categories are actually true target objects
-    top1_real_count = 0
-    top2_real_count = 0
-    top3_real_count = 0
-    not_in_top3_real_count = 0
+    # Store objects categorized into True Positives (TP) and False Positives (FP)
+    top1_objs = {'TP': [], 'FP':[]}
+    top2_objs = {'TP': [], 'FP': []}
+    top3_objs = {'TP':[], 'FP': []}
+    not3_objs = {'TP': [], 'FP':[]}
 
     for i in range(len(y_val_encoded)):
         filename = val_filenames[i]
@@ -317,16 +363,23 @@ def main():
         # Check where the TARGET_EVAL_CLASS sits in the predicted rankings for this sample
         if target_class_idx == top3_preds[i, 0]:
             top1_list.append(filename)
-            if is_real: top1_real_count += 1
+            if is_real: top1_objs['TP'].append(filename)
+            else: top1_objs['FP'].append(filename)
+            
         elif target_class_idx == top3_preds[i, 1]:
             top2_list.append(filename)
-            if is_real: top2_real_count += 1
+            if is_real: top2_objs['TP'].append(filename)
+            else: top2_objs['FP'].append(filename)
+            
         elif target_class_idx == top3_preds[i, 2]:
             top3_list.append(filename)
-            if is_real: top3_real_count += 1
+            if is_real: top3_objs['TP'].append(filename)
+            else: top3_objs['FP'].append(filename)
+            
         else:
             not_in_top3_list.append(filename)
-            if is_real: not_in_top3_real_count += 1
+            if is_real: not3_objs['TP'].append(filename)
+            else: not3_objs['FP'].append(filename)
 
     # 7. Write to Output TXT Files
     def write_list_to_file(file_name, data_list):
@@ -340,6 +393,52 @@ def main():
     write_list_to_file(f"{prefix}TOP1_List.txt", top1_list)
     write_list_to_file(f"{prefix}TOP2_List.txt", top2_list)
     write_list_to_file(f"{prefix}TOP3_List.txt", top3_list)
+    
+    # --- END OF TIMED BLOCK ---
+    end_time = time.time()
+    measured_time = end_time - start_time
+    
+    
+    # --- Calculate Image and Object TP/FP Metrics for plotting ---
+    obj_tp = []
+    obj_fp =[]
+    img_tp = []
+    img_fp =[]
+    
+    global_tp_objs = 0
+    global_fp_objs = 0
+    global_tp_imgs_set = set()
+    global_fp_imgs_set = set()
+
+    # UPDATE: Wrap with enumerate to easily track which category we are processing
+    for idx, cat_dict in enumerate([top1_objs, top2_objs, top3_objs, not3_objs]):
+        tps = cat_dict['TP']
+        fps = cat_dict['FP']
+
+        o_tp = len(tps)
+        o_fp = len(fps)
+        obj_tp.append(o_tp)
+        obj_fp.append(o_fp)
+
+        tp_img_names = set(get_image_name(f, SAFE_CLASS_NAMES) for f in tps)
+        fp_img_names = set(get_image_name(f, SAFE_CLASS_NAMES) for f in fps)
+
+        # "if an image has the TP objects it will be considered as TP image" -> remove overlap from FP
+        pure_fp_img_names = fp_img_names - tp_img_names
+
+        img_tp.append(len(tp_img_names))
+        img_fp.append(len(pure_fp_img_names))
+
+        # UPDATE: Only add to the global pool if it's TOP-1, TOP-2, or TOP-3 (Indices 0, 1, 2)
+        if idx < 3:
+            global_tp_objs += o_tp
+            global_fp_objs += o_fp
+            global_tp_imgs_set.update(tp_img_names)
+            global_fp_imgs_set.update(fp_img_names)
+    # Resolve global images the exact same way
+    global_pure_fp_imgs_set = global_fp_imgs_set - global_tp_imgs_set
+    global_tp_img_count = len(global_tp_imgs_set)
+    global_fp_img_count = len(global_pure_fp_imgs_set)
 
     # 8. Generate Statistics File
     stats_path = os.path.join(OUTPUT_DIR, f"{prefix}Statistics.txt")
@@ -360,25 +459,30 @@ def main():
             f.write(f"Objects actually belonging to ground truth '{TARGET_EVAL_CLASS}': {real_count}\n")
             f.write(f"Accuracy (Real / Total) within category: {acc:.2f}%\n\n")
 
-        write_category_stats("TOP-1 Category", len(top1_list), top1_real_count)
-        write_category_stats("TOP-2 Category", len(top2_list), top2_real_count)
-        write_category_stats("TOP-3 Category", len(top3_list), top3_real_count)
-        write_category_stats("Not in TOP-3 Category", len(not_in_top3_list), not_in_top3_real_count)
+        write_category_stats("TOP-1 Category", len(top1_list), len(top1_objs['TP']))
+        write_category_stats("TOP-2 Category", len(top2_list), len(top2_objs['TP']))
+        write_category_stats("TOP-3 Category", len(top3_list), len(top3_objs['TP']))
+        write_category_stats("Not in TOP-3 Category", len(not_in_top3_list), len(not3_objs['TP']))
 
     print(f"\nEvaluation Complete! Results saved to '{OUTPUT_DIR}'")
-    print(f"Categorized into TOP-1: {len(top1_list)} (Actually real: {top1_real_count})")
-    print(f"Categorized into TOP-2: {len(top2_list)} (Actually real: {top2_real_count})")
-    print(f"Categorized into TOP-3: {len(top3_list)} (Actually real: {top3_real_count})")
-    print(f"Not in TOP-3: {len(not_in_top3_list)} (Actually real: {not_in_top3_real_count})")
+    print(f"Categorized into TOP-1: {len(top1_list)} (Actually real: {len(top1_objs['TP'])})")
+    print(f"Categorized into TOP-2: {len(top2_list)} (Actually real: {len(top2_objs['TP'])})")
+    print(f"Categorized into TOP-3: {len(top3_list)} (Actually real: {len(top3_objs['TP'])})")
+    print(f"Not in TOP-3: {len(not_in_top3_list)} (Actually real: {len(not3_objs['TP'])})")
 
     # Generate Visualizations
     plot_statistics(
-        len(top1_list), top1_real_count,
-        len(top2_list), top2_real_count,
-        len(top3_list), top3_real_count,
-        len(not_in_top3_list), not_in_top3_real_count,
+        obj_tp, obj_fp, 
+        img_tp, img_fp, 
+        global_tp_objs, global_fp_objs, 
+        global_tp_img_count, global_fp_img_count,
         TARGET_EVAL_CLASS, OUTPUT_DIR
     )
+    
+    # Print measured execution time as requested
+    print("-" * 50)
+    print(f"Measured block execution time: {measured_time:.4f} seconds")
+    print("-" * 50)
     
 if __name__ == "__main__":
     main()

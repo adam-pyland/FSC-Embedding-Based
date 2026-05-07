@@ -77,17 +77,17 @@ SEED = 9
 
 SHOTS = 20
 
-BEST_HYPERPARAMETERS=None
+# BEST_HYPERPARAMETERS=None
 
-# BEST_HYPERPARAMETERS = {
-#     "batch_size": 1024,
-#     "gamma": 2.580627947590925,
-#     "center_weight": 0.028365290137279026,
-#     "lr": 0.004351134823645674,
-#     "weight_decay": 0.003054107429563069,
-#     "weight_smoothing": 0.5503699400128665,
-#     "novel_multiplier": 9.498785088342668
-# }
+BEST_HYPERPARAMETERS = {
+    "batch_size": 512,
+    "gamma": 1.5865275935454093,
+    "center_weight": 0.0371514361702668,
+    "lr": 0.0021384225562175534,
+    "weight_decay": 3.3575193746061406e-05,
+    "weight_smoothing": 0.28410665660370493,
+    "novel_multiplier": 2.0048537438420975
+}
 
 
 MAX_EPOCHS = 500
