@@ -2,8 +2,8 @@ import os
 from glob import glob
 
 dirs = [
-    "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/test/base_class/",
-    "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/test/novel_class_trailer_20_shots/"
+    "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/test_cementmixertrucks/base_class/",
+    "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/test_cementmixertrucks/novel_class_cementmixertrucks_20_shots/"
 ]
 
 image_names = set()

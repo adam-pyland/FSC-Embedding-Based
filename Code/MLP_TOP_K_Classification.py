@@ -22,7 +22,7 @@ CUSTOM_METRIC_TYPE = 'combined'
 DISTANCE_METRIC = 'cosine'
 
 # Set the target class to track (e.g., 'Trailer'). 
-TARGET_EVAL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
+TARGET_EVAL_CLASS = 'CementMixerTrucks'
 
 Dataset_Name = 'Lavyanut'
 
