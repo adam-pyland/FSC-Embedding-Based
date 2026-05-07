@@ -2,6 +2,7 @@ import os
 import glob
 import time
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from joblib import load
 
@@ -21,7 +22,6 @@ CUSTOM_METRIC_TYPE = 'combined'
 DISTANCE_METRIC = 'cosine'
 
 # Set the target class to track (e.g., 'Trailer'). 
-# Must be set to evaluate prediction-based rankings.
 TARGET_EVAL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 
 Dataset_Name = 'Lavyanut'
@@ -32,11 +32,9 @@ SHOTS = 20
 LOSS_COMBINATION = 'focal_center'
 SAVED_MODEL_DIR = f"models_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-
 # Output directory for the text files
 OUTPUT_DIR = f"Outputs_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_EVAL_CLASS}/TopK_Evaluation_Lists-{LOSS_COMBINATION}-Loss-{DISTANCE_METRIC}-{'Distance' if DISTANCE_METRIC == 'logits' else 'Logits'}-Based"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 
 ALL_CLASSES =[
 'Bulldozers',
@@ -52,15 +50,14 @@ ALL_CLASSES =[
 'TruckTractor'
 ]
 
-WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'. Or WSL if decided to work on WSL on windows in Yehud.
+WORK_PLACE = 'matrix' 
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut_old' if WORK_PLACE == 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut_partial/'
 if WORK_PLACE == 'WSL':
     data_path = '/mnt/c/Adams/FSOD/Data/Lavyanut/Lavyanut'
 
-
 SAFE_CLASS_NAMES =[cls.replace(" ", "_") for cls in ALL_CLASSES]
 
-# Directories (Change these if they differ from your environment)
+# Directories
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
 VAL_BASE_DIR  = f'{data_path}/Obj_Embs/test/base_class/'
 
@@ -75,23 +72,17 @@ elif TARGET_EVAL_CLASS == 'Forklifts':
 else:
     raise ValueError("Unknown target class for directories!")
 
-
-
 # ==========================================
 # 1. PyTorch Model Definition
 # ==========================================
 
 class MLP_PyTorch(nn.Module):
-    """
-    Replicates the scikit-learn MLP architecture:
-    Input -> Linear(512) -> ReLU -> Linear(256) -> ReLU -> Linear(num_classes)
-    """
     def __init__(self, input_dim, num_classes):
         super(MLP_PyTorch, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 256) # Reduced size
-        self.dropout1 = nn.Dropout(p=0.4)    # Added dropout
-        self.fc2 = nn.Linear(256, 128)       # Reduced size
-        self.dropout2 = nn.Dropout(p=0.4)    # Added dropout
+        self.fc1 = nn.Linear(input_dim, 256) 
+        self.dropout1 = nn.Dropout(p=0.4)    
+        self.fc2 = nn.Linear(256, 128)       
+        self.dropout2 = nn.Dropout(p=0.4)    
         self.fc3 = nn.Linear(128, num_classes)
 
     def forward(self, x):
@@ -100,14 +91,13 @@ class MLP_PyTorch(nn.Module):
         h2 = F.relu(self.fc2(h1))
         h2_drop = self.dropout2(h2)
         logits = self.fc3(h2_drop)
-        return logits, h2 # Still return pure h2 for metric distances
+        return logits, h2 
     
 # ==========================================
 # 2. Evaluation Helpers
 # ==========================================
 
 def compute_train_centers(model, dataloader, num_classes, device):
-    """Calculates prototype centers required for 'cosine' or 'l2' metrics."""
     model.eval()
     centers = torch.zeros(num_classes, 128).to(device)
     counts = torch.zeros(num_classes).to(device)
@@ -124,14 +114,13 @@ def compute_train_centers(model, dataloader, num_classes, device):
     return centers
 
 def compute_prototype_scores(h2, centers, metric='cosine'):
-    """Calculates distance/similarity to prototypes (Higher score = closer)."""
     if metric.lower() == 'cosine':
         h2_norm = F.normalize(h2, p=2, dim=1)
         centers_norm = F.normalize(centers, p=2, dim=1)
         scores = torch.mm(h2_norm, centers_norm.t()) 
     elif metric.lower() == 'l2':
         dist = torch.cdist(h2, centers, p=2.0)
-        scores = -dist # Negate so highest value is the closest distance
+        scores = -dist 
     else:
         raise ValueError("Metric must be 'l2' or 'cosine'")
     return scores
@@ -153,114 +142,147 @@ def load_features_and_filenames(directory, X_list, y_list, filenames_list):
                 break
 
 def get_image_name(filename, safe_classes):
-    """Extracts the base image name from the full object npy filename."""
     for cls in safe_classes:
         if f"_{cls}_" in filename:
             return filename.split(f"_{cls}_")[0]
-    # Fallback method just in case
     return filename.rsplit('_', 2)[0]
 
-def plot_statistics(obj_tp, obj_fp, img_tp, img_fp,
-                    g_tp_obj, g_fp_obj, g_tp_img, g_fp_img, 
-                    target_class, output_dir):
-    categories =['TOP-1', 'TOP-2', 'TOP-3', 'Not in TOP-3']
-    
-    obj_tp = np.array(obj_tp)
-    obj_fp = np.array(obj_fp)
-    img_tp = np.array(img_tp)
-    img_fp = np.array(img_fp)
-    
-    obj_totals = obj_tp + obj_fp
-    img_totals = img_tp + img_fp
-    
-    # Calculate Percentages for 100% Stacked Bars (Ratio)
-    obj_tp_pct = np.divide(obj_tp, obj_totals, out=np.zeros_like(obj_tp, dtype=float), where=obj_totals!=0) * 100
-    obj_fp_pct = np.divide(obj_fp, obj_totals, out=np.zeros_like(obj_fp, dtype=float), where=obj_totals!=0) * 100
-    
-    img_tp_pct = np.divide(img_tp, img_totals, out=np.zeros_like(img_tp, dtype=float), where=img_totals!=0) * 100
-    img_fp_pct = np.divide(img_fp, img_totals, out=np.zeros_like(img_fp, dtype=float), where=img_totals!=0) * 100
+# --- PLOTTING FUNCTION 1: CONTINUOUS CURVES ---
+def plot_ranking_evaluation(df_sorted, target_class, output_dir):
+    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle(f"Global Ranking Curves for: {target_class}\nSorted by Model Confidence", fontsize=16, fontweight='bold')
 
-    fig, axs = plt.subplots(1, 3, figsize=(18, 6.5))
-    fig.suptitle(f'Prediction-Based Top-K Evaluation: {target_class}', fontsize=16, fontweight='bold')
+    K_vals = df_sorted['K']
 
-    # --- Plot 1: Stacked Bar Chart (Object Ratios) ---
-    axs[0].bar(categories, obj_tp_pct, label='TP Objects', color='forestgreen')
-    axs[0].bar(categories, obj_fp_pct, bottom=obj_tp_pct, label='FP Objects', color='lightcoral')
-    axs[0].set_title('Object Ratio (%)\nTP vs FP')
-    axs[0].set_ylabel('Percentage')
-    axs[0].set_ylim(0, 100)
-    axs[0].legend(loc='lower left')
-    for i in range(len(categories)):
-        if obj_totals[i] > 0:
-            if obj_tp_pct[i] >= 5:
-                axs[0].text(i, obj_tp_pct[i] / 2, f"{obj_tp_pct[i]:.1f}%", ha='center', color='white', fontweight='bold')
-            if obj_fp_pct[i] >= 5:
-                axs[0].text(i, obj_tp_pct[i] + (obj_fp_pct[i] / 2), f"{obj_fp_pct[i]:.1f}%", ha='center', color='black', fontweight='bold')
+    axs[0, 0].plot(K_vals, df_sorted['Cum_TP_obj'], label='True Positive Objects', color='green', linewidth=2)
+    axs[0, 0].plot(K_vals, df_sorted['Cum_FP_obj'], label='False Positive Objects', color='red', linewidth=2)
+    axs[0, 0].set_title("1. Cumulative Objects (Absolute Count)")
+    axs[0, 0].set_xlabel("Rank (Top K Items)")
+    axs[0, 0].set_ylabel("Total Objects")
+    axs[0, 0].legend()
+    axs[0, 0].grid(True, linestyle='--', alpha=0.7)
 
-    # --- Plot 2: Stacked Bar Chart (Image Ratios) ---
-    axs[1].bar(categories, img_tp_pct, label='TP Images', color='forestgreen')
-    axs[1].bar(categories, img_fp_pct, bottom=img_tp_pct, label='FP Images', color='lightcoral')
-    axs[1].set_title('Image Ratio (%)\nTP vs FP')
-    axs[1].set_ylabel('Percentage')
-    axs[1].set_ylim(0, 100)
-    axs[1].legend(loc='lower left')
-    for i in range(len(categories)):
-        if img_totals[i] > 0:
-            if img_tp_pct[i] >= 5:
-                axs[1].text(i, img_tp_pct[i] / 2, f"{img_tp_pct[i]:.1f}%", ha='center', color='white', fontweight='bold')
-            if img_fp_pct[i] >= 5:
-                axs[1].text(i, img_tp_pct[i] + (img_fp_pct[i] / 2), f"{img_fp_pct[i]:.1f}%", ha='center', color='black', fontweight='bold')
+    axs[0, 1].plot(K_vals, df_sorted['Precision_obj_at_K'] * 100, label='Precision @ K', color='blue', linewidth=2)
+    axs[0, 1].set_title("2. Object Precision at Top K")
+    axs[0, 1].set_xlabel("Rank (Top K Items)")
+    axs[0, 1].set_ylabel("Precision (%)")
+    axs[0, 1].set_ylim(0, 105)
+    axs[0, 1].legend()
+    axs[0, 1].grid(True, linestyle='--', alpha=0.7)
 
-    # --- Plot 3: Pie Chart (Test Novel Class Distribution) ---
-    labels =[cat for cat, r in zip(categories, obj_tp) if r > 0]
-    sizes = [r for r in obj_tp if r > 0]
-    colors =['#ff9999','#66b3ff','#99ff99','#ffcc99'][:len(sizes)]
+    axs[1, 0].plot(K_vals, df_sorted['Cum_TP_img'], label='True Positive Images', color='green', linewidth=2)
+    axs[1, 0].plot(K_vals, df_sorted['Cum_FP_img'], label='False Positive Images (No TPs)', color='red', linewidth=2)
+    axs[1, 0].set_title("3. Cumulative Unique Images (Absolute Count)")
+    axs[1, 0].set_xlabel("Rank (Top K Items)")
+    axs[1, 0].set_ylabel("Total Unique Images")
+    axs[1, 0].legend()
+    axs[1, 0].grid(True, linestyle='--', alpha=0.7)
+
+    axs[1, 1].plot(K_vals, df_sorted['Precision_img_at_K'] * 100, label='Precision @ K', color='purple', linewidth=2)
+    axs[1, 1].set_title("4. Image Precision at Top K")
+    axs[1, 1].set_xlabel("Rank (Top K Items)")
+    axs[1, 1].set_ylabel("Precision (%)")
+    axs[1, 1].set_ylim(0, 105)
+    axs[1, 1].legend()
+    axs[1, 1].grid(True, linestyle='--', alpha=0.7)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
-    if sum(sizes) > 0:
-        axs[2].pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=140, explode=[0.05]*len(sizes))
-        axs[2].set_title('Test Novel Class Distribution to categories')
-    else:
-        axs[2].text(0.5, 0.5, "No Real Targets Found", ha='center', va='center')
-        axs[2].set_title('Test Novel Class Distribution to categories')
-        axs[2].axis('off')
-
-    # --- Calculate and Display Global Percentages at the Bottom ---
-    g_obj_total = g_tp_obj + g_fp_obj
-    g_img_total = g_tp_img + g_fp_img
-    
-    g_tp_obj_pct = (g_tp_obj / g_obj_total * 100) if g_obj_total > 0 else 0.0
-    g_fp_obj_pct = (g_fp_obj / g_obj_total * 100) if g_obj_total > 0 else 0.0
-    
-    g_tp_img_pct = (g_tp_img / g_img_total * 100) if g_img_total > 0 else 0.0
-    g_fp_img_pct = (g_fp_img / g_img_total * 100) if g_img_total > 0 else 0.0
-
-    # UPDATE: Changed "Overall" to "TOP-3" to accurately reflect the data
-    stats_text = (
-        f"TOP-3 Objects - TP (Target Class): {g_tp_obj_pct:.1f}% | FP (Other Classes): {g_fp_obj_pct:.1f}%\n"
-        f"TOP-3 Images - TP (Contains Target): {g_tp_img_pct:.1f}% | FP (No Target Present): {g_fp_img_pct:.1f}%"
-    )
-    
-    fig.text(0.5, 0.02, stats_text, ha='center', fontsize=13, 
-             bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray', boxstyle='round,pad=0.5'))
-
-    plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Leaves space for the bottom text
-    
-    # Save the plot
-    plot_path = os.path.join(output_dir, f"{target_class}_Evaluation_Plots.png")
+    plot_path = os.path.join(output_dir, f"{target_class}_Ranking_Curves.png")
     plt.savefig(plot_path, dpi=300)
-    print(f"Saved evaluation plots to: {plot_path}")
+    print(f"Saved Continuous Ranking curves to: {plot_path}")
+
+# --- NEW PLOTTING FUNCTION 2: GROUPED BAR CHARTS FOR BOSS ---
+def plot_sampled_bar_charts(df_sorted, target_class, output_dir):
+    total_k = len(df_sorted)
+    
+    # Define sensible business milestones 
+    potential_milestones =[10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500]
+    
+    # Filter milestones strictly <= total items we actually evaluated
+    selected_ks = [k for k in potential_milestones if k <= total_k]
+    if total_k not in selected_ks:
+        selected_ks.append(total_k)
+        
+    # Ensure max 10 bars so it doesn't get cluttered (take the most relevant evenly)
+    if len(selected_ks) > 10:
+        # Keep 1st, 2nd, and 8 evenly spaced from the rest up to max
+        idx = np.round(np.linspace(0, len(selected_ks)-1, 10)).astype(int)
+        selected_ks = [selected_ks[i] for i in sorted(list(set(idx)))]
+    
+    # Extract data just for these K values
+    df_sampled = df_sorted[df_sorted['K'].isin(selected_ks)].copy()
+    
+    x = np.arange(len(selected_ks))  # the label locations
+    width = 0.35                     # the width of the bars
+    
+    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle(f"Sampled Top-K Performance: {target_class}", fontsize=16, fontweight='bold')
+    
+    labels =[f"Top {k}" for k in df_sampled['K']]
+    
+    # --- 1. Objects TP/FP Grouped Bar ---
+    axs[0, 0].bar(x - width/2, df_sampled['Cum_TP_obj'], width, label='TP Objects', color='forestgreen')
+    axs[0, 0].bar(x + width/2, df_sampled['Cum_FP_obj'], width, label='FP Objects', color='lightcoral')
+    axs[0, 0].set_title("1. Cumulative Objects (TP vs FP)")
+    axs[0, 0].set_xticks(x)
+    axs[0, 0].set_xticklabels(labels, rotation=45)
+    axs[0, 0].set_ylabel("Total Object Count")
+    axs[0, 0].legend()
+    # Add actual numbers on top of bars
+    for i, (tp, fp) in enumerate(zip(df_sampled['Cum_TP_obj'], df_sampled['Cum_FP_obj'])):
+        axs[0, 0].text(i - width/2, tp + (tp*0.02), str(int(tp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkgreen')
+        axs[0, 0].text(i + width/2, fp + (fp*0.02), str(int(fp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkred')
+
+    # --- 2. Object Precision Bar ---
+    prec_obj = df_sampled['Precision_obj_at_K'] * 100
+    axs[0, 1].bar(x, prec_obj, width=0.5, label='Precision (%)', color='royalblue')
+    axs[0, 1].set_title("2. Object Precision at Rank K")
+    axs[0, 1].set_xticks(x)
+    axs[0, 1].set_xticklabels(labels, rotation=45)
+    axs[0, 1].set_ylabel("Precision (%)")
+    axs[0, 1].set_ylim(0, 115) 
+    for i, p in enumerate(prec_obj):
+        axs[0, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # --- 3. Images TP/FP Grouped Bar ---
+    axs[1, 0].bar(x - width/2, df_sampled['Cum_TP_img'], width, label='TP Images', color='forestgreen')
+    axs[1, 0].bar(x + width/2, df_sampled['Cum_FP_img'], width, label='FP Images (No TP)', color='lightcoral')
+    axs[1, 0].set_title("3. Cumulative Unique Images (TP vs FP)")
+    axs[1, 0].set_xticks(x)
+    axs[1, 0].set_xticklabels(labels, rotation=45)
+    axs[1, 0].set_ylabel("Total Unique Images")
+    axs[1, 0].legend()
+    for i, (tp, fp) in enumerate(zip(df_sampled['Cum_TP_img'], df_sampled['Cum_FP_img'])):
+        axs[1, 0].text(i - width/2, tp + (tp*0.02), str(int(tp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkgreen')
+        axs[1, 0].text(i + width/2, fp + (fp*0.02), str(int(fp)), ha='center', va='bottom', fontsize=10, fontweight='bold', color='darkred')
+
+    # --- 4. Images Precision Bar ---
+    prec_img = df_sampled['Precision_img_at_K'] * 100
+    axs[1, 1].bar(x, prec_img, width=0.5, label='Precision (%)', color='purple')
+    axs[1, 1].set_title("4. Image Precision at Rank K")
+    axs[1, 1].set_xticks(x)
+    axs[1, 1].set_xticklabels(labels, rotation=45)
+    axs[1, 1].set_ylabel("Precision (%)")
+    axs[1, 1].set_ylim(0, 115)
+    for i, p in enumerate(prec_img):
+        axs[1, 1].text(i, p + 2, f"{p:.1f}%", ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    
+    plot_path = os.path.join(output_dir, f"{target_class}_Sampled_Bar_Charts.png")
+    plt.savefig(plot_path, dpi=300)
+    print(f"Saved Sampled Bar Charts to: {plot_path}")
 
 # ==========================================
 # 3. Main Evaluation Pipeline
 # ==========================================
 
 def main():
-    
-    # --- BEGINNING OF TIMED BLOCK ---
     start_time = time.time()
     
     if TARGET_EVAL_CLASS is None:
-        raise ValueError("TARGET_EVAL_CLASS must be specified to perform prediction-based category ranking.")
+        raise ValueError("TARGET_EVAL_CLASS must be specified.")
 
     print("="*50)
     print("Starting Prediction-Based Top-K Evaluation")
@@ -281,7 +303,6 @@ def main():
     le = load(le_file)
     num_classes = len(le.classes_)
 
-    # Ensure TARGET_EVAL_CLASS is in the label encoder
     if TARGET_EVAL_CLASS not in le.classes_:
         print(f"Error: '{TARGET_EVAL_CLASS}' not found in loaded Label Encoder classes.")
         return
@@ -289,18 +310,16 @@ def main():
     target_class_idx = le.transform([TARGET_EVAL_CLASS])[0]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
+    
     # 2. Setup Model
     input_dim = getattr(scaler, 'n_features_in_', 1024)
-    
     model = MLP_PyTorch(input_dim=input_dim, num_classes=num_classes).to(device)
     model.load_state_dict(torch.load(best_model_file, map_location=device))
     model.eval()
 
     # 3. Compute Training Centers (if required)
     train_centers = None
-    if DISTANCE_METRIC in ['l2', 'cosine']:
+    if DISTANCE_METRIC in['l2', 'cosine']:
         print("\nLoading Training Data to calculate prototype centers...")
         X_train, y_train, _ = [], [],[]
         load_features_and_filenames(TRAIN_BASE_DIR, X_train, y_train, _)
@@ -314,7 +333,6 @@ def main():
         train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=False)
         
         train_centers = compute_train_centers(model, train_loader, num_classes, device)
-        print("Train Centers computed successfully.")
 
     # 4. Load Validation Data + Filenames
     print("\nLoading Validation Data...")
@@ -325,42 +343,84 @@ def main():
     X_val = np.array(X_val)
     y_val_encoded = le.transform(np.array(y_val))
     X_val_scaled = scaler.transform(X_val)
-    
-    print(f"Loaded {X_val.shape[0]} validation samples.")
 
-    # 5. Evaluate and Get Top-3 Scores
+    # 5. Evaluate Scores
     X_val_tensor = torch.FloatTensor(X_val_scaled).to(device)
     
     with torch.no_grad():
         logits, hidden_feats = model(X_val_tensor)
         
-        if DISTANCE_METRIC in['l2', 'cosine']:
+        if DISTANCE_METRIC in ['l2', 'cosine']:
             scores = compute_prototype_scores(hidden_feats, train_centers, metric=DISTANCE_METRIC)
         elif DISTANCE_METRIC == 'logits':
             scores = logits
 
-        # Extract top 3 predicted class indices for each sample
-        # shape: (N, 3), where each row has the class indices sorted by highest score
         _, top3_preds = torch.topk(scores, 3, dim=1)
         top3_preds = top3_preds.cpu().numpy()
+        
+        # Extract absolute scores specifically for the TARGET CLASS
+        target_class_scores = scores[:, target_class_idx].cpu().numpy()
 
-    # 6. Categorize into Mutually Exclusive Lists based on PREDICTED rank of the target class
-    top1_list = []
+    # ==========================================
+    # --- PANDAS RANKING LOGIC FOR PLOTS ---
+    # ==========================================
+    print("\nCalculating Global Rankings (Boss's request)...")
+    
+    df = pd.DataFrame({
+        'filename': val_filenames,
+        'is_target': (y_val_encoded == target_class_idx),
+        'score': target_class_scores
+    })
+    
+    df['image_name'] = df['filename'].apply(lambda x: get_image_name(x, SAFE_CLASS_NAMES))
+    df_sorted = df.sort_values(by='score', ascending=False).reset_index(drop=True)
+    df_sorted['K'] = df_sorted.index + 1
+    
+    # 1. Object-Level Calculations
+    df_sorted['TP_obj'] = df_sorted['is_target'].astype(int)
+    df_sorted['FP_obj'] = (~df_sorted['is_target']).astype(int)
+    
+    df_sorted['Cum_TP_obj'] = df_sorted['TP_obj'].cumsum()
+    df_sorted['Cum_FP_obj'] = df_sorted['FP_obj'].cumsum()
+    df_sorted['Precision_obj_at_K'] = df_sorted['Cum_TP_obj'] / df_sorted['K']
+    
+    # 2. Image-Level Calculations
+    cum_tp_imgs =[]
+    cum_fp_imgs =[]
+    seen_tp_imgs = set()
+    seen_fp_imgs = set()
+    
+    for idx, row in df_sorted.iterrows():
+        img = row['image_name']
+        if row['is_target']:
+            seen_tp_imgs.add(img)
+        else:
+            seen_fp_imgs.add(img)
+            
+        pure_fp_imgs = seen_fp_imgs - seen_tp_imgs
+        cum_tp_imgs.append(len(seen_tp_imgs))
+        cum_fp_imgs.append(len(pure_fp_imgs))
+        
+    df_sorted['Cum_TP_img'] = cum_tp_imgs
+    df_sorted['Cum_FP_img'] = cum_fp_imgs
+    total_imgs_at_K = df_sorted['Cum_TP_img'] + df_sorted['Cum_FP_img']
+    df_sorted['Precision_img_at_K'] = df_sorted['Cum_TP_img'] / total_imgs_at_K.replace(0, 1)
+
+    # 6. Categorize into Mutually Exclusive Lists (Original Code)
+    top1_list =[]
     top2_list = []
     top3_list =[]
     not_in_top3_list =[]
 
-    # Store objects categorized into True Positives (TP) and False Positives (FP)
-    top1_objs = {'TP': [], 'FP':[]}
-    top2_objs = {'TP': [], 'FP': []}
-    top3_objs = {'TP':[], 'FP': []}
-    not3_objs = {'TP': [], 'FP':[]}
+    top1_objs = {'TP':[], 'FP':[]}
+    top2_objs = {'TP':[], 'FP':[]}
+    top3_objs = {'TP':[], 'FP':[]}
+    not3_objs = {'TP':[], 'FP':[]}
 
     for i in range(len(y_val_encoded)):
         filename = val_filenames[i]
         is_real = (y_val_encoded[i] == target_class_idx)
 
-        # Check where the TARGET_EVAL_CLASS sits in the predicted rankings for this sample
         if target_class_idx == top3_preds[i, 0]:
             top1_list.append(filename)
             if is_real: top1_objs['TP'].append(filename)
@@ -389,58 +449,14 @@ def main():
                 f.write(f"{item}\n")
 
     prefix = f"{TARGET_EVAL_CLASS}_"
-    
     write_list_to_file(f"{prefix}TOP1_List.txt", top1_list)
     write_list_to_file(f"{prefix}TOP2_List.txt", top2_list)
     write_list_to_file(f"{prefix}TOP3_List.txt", top3_list)
     
-    # --- END OF TIMED BLOCK ---
     end_time = time.time()
     measured_time = end_time - start_time
     
-    
-    # --- Calculate Image and Object TP/FP Metrics for plotting ---
-    obj_tp = []
-    obj_fp =[]
-    img_tp = []
-    img_fp =[]
-    
-    global_tp_objs = 0
-    global_fp_objs = 0
-    global_tp_imgs_set = set()
-    global_fp_imgs_set = set()
-
-    # UPDATE: Wrap with enumerate to easily track which category we are processing
-    for idx, cat_dict in enumerate([top1_objs, top2_objs, top3_objs, not3_objs]):
-        tps = cat_dict['TP']
-        fps = cat_dict['FP']
-
-        o_tp = len(tps)
-        o_fp = len(fps)
-        obj_tp.append(o_tp)
-        obj_fp.append(o_fp)
-
-        tp_img_names = set(get_image_name(f, SAFE_CLASS_NAMES) for f in tps)
-        fp_img_names = set(get_image_name(f, SAFE_CLASS_NAMES) for f in fps)
-
-        # "if an image has the TP objects it will be considered as TP image" -> remove overlap from FP
-        pure_fp_img_names = fp_img_names - tp_img_names
-
-        img_tp.append(len(tp_img_names))
-        img_fp.append(len(pure_fp_img_names))
-
-        # UPDATE: Only add to the global pool if it's TOP-1, TOP-2, or TOP-3 (Indices 0, 1, 2)
-        if idx < 3:
-            global_tp_objs += o_tp
-            global_fp_objs += o_fp
-            global_tp_imgs_set.update(tp_img_names)
-            global_fp_imgs_set.update(fp_img_names)
-    # Resolve global images the exact same way
-    global_pure_fp_imgs_set = global_fp_imgs_set - global_tp_imgs_set
-    global_tp_img_count = len(global_tp_imgs_set)
-    global_fp_img_count = len(global_pure_fp_imgs_set)
-
-    # 8. Generate Statistics File
+    # 8. Generate Statistics File (Original logic untouched)
     stats_path = os.path.join(OUTPUT_DIR, f"{prefix}Statistics.txt")
     total_samples = len(y_val_encoded)
     
@@ -448,9 +464,7 @@ def main():
         f.write("="*40 + "\n")
         f.write(f"PREDICTION-BASED TOP-K STATISTICS\n")
         f.write(f"Target Class Evaluated: {TARGET_EVAL_CLASS}\n")
-        f.write(f"Prediction Mode: {DISTANCE_METRIC.upper()}\n")
         f.write("="*40 + "\n\n")
-        f.write(f"Total Validation Samples Evaluated: {total_samples}\n\n")
 
         def write_category_stats(cat_name, total_count, real_count):
             acc = (real_count / total_count * 100) if total_count > 0 else 0.0
@@ -465,21 +479,15 @@ def main():
         write_category_stats("Not in TOP-3 Category", len(not_in_top3_list), len(not3_objs['TP']))
 
     print(f"\nEvaluation Complete! Results saved to '{OUTPUT_DIR}'")
-    print(f"Categorized into TOP-1: {len(top1_list)} (Actually real: {len(top1_objs['TP'])})")
-    print(f"Categorized into TOP-2: {len(top2_list)} (Actually real: {len(top2_objs['TP'])})")
-    print(f"Categorized into TOP-3: {len(top3_list)} (Actually real: {len(top3_objs['TP'])})")
-    print(f"Not in TOP-3: {len(not_in_top3_list)} (Actually real: {len(not3_objs['TP'])})")
 
-    # Generate Visualizations
-    plot_statistics(
-        obj_tp, obj_fp, 
-        img_tp, img_fp, 
-        global_tp_objs, global_fp_objs, 
-        global_tp_img_count, global_fp_img_count,
-        TARGET_EVAL_CLASS, OUTPUT_DIR
-    )
+    # --- Generate Visualizations requested by the boss ---
+    plot_ranking_evaluation(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
+    plot_sampled_bar_charts(df_sorted, TARGET_EVAL_CLASS, OUTPUT_DIR)
     
-    # Print measured execution time as requested
+    # Save a CSV of the data we plotted 
+    csv_path = os.path.join(OUTPUT_DIR, f"{prefix}Ranking_Data.csv")
+    df_sorted.to_csv(csv_path, index=False)
+    
     print("-" * 50)
     print(f"Measured block execution time: {measured_time:.4f} seconds")
     print("-" * 50)
