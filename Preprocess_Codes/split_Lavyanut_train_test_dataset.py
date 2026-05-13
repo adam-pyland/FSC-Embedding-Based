@@ -4,6 +4,7 @@ import re
 import shutil
 import random
 from collections import Counter
+from pathlib import Path
 
 # ================= Paths & Settings =================
 SOURCE_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/All_Embs/"
@@ -324,6 +325,36 @@ def count_crop_classes(crops_dir, output_txt_path):
     print(f"Successfully counted {sum(class_counts.values())} objects across {len(class_counts)} classes.")
     print(f"Results saved to: {output_txt_path}")
 
+
+def split_crops_dataset():
+    # Define directories
+    embs_dir = Path("/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Embs")
+    all_crops_dir = Path("/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops/All_Crops")
+    out_crops_base_dir = Path("/home/adamm/Documents/FSOD/Data/Lavyanut/Obj_Crops")
+    
+    # Iterate over all .npy files in the Obj_Embs directory structure recursively
+    for npy_file in embs_dir.rglob("*.npy"):
+        # Get the relative path (e.g., train/base_class/file.npy)
+        rel_path = npy_file.relative_to(embs_dir)
+        
+        # Determine the target .jpg filename
+        jpg_filename = npy_file.with_suffix('.jpg').name
+        
+        # Source path of the original image crop
+        src_jpg = all_crops_dir / jpg_filename
+        
+        # Target path where the image crop should be saved (e.g., Obj_Crops/train/base_class/file.jpg)
+        dest_jpg = out_crops_base_dir / rel_path.parent / jpg_filename
+        
+        if src_jpg.exists():
+            # Create the necessary sub-folders in Obj_Crops if they don't exist
+            dest_jpg.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Copy the image file to the new structured directory (copy2 preserves metadata)
+            shutil.copy2(src_jpg, dest_jpg)
+        else:
+            print(f"Warning: Could not find matching crop image for {src_jpg}")
+
 if __name__ == "__main__":
     # label_path = "/home/adamm/Documents/FSOD/Data/Lavyanut/labels"
     # image_path = "/home/adamm/Documents/FSOD/Data/Lavyanut/images"
@@ -344,4 +375,5 @@ if __name__ == "__main__":
     # output_file = "/home/adamm/Documents/FSOD/Data/Lavyanut/class_counts.txt"
 
     # count_crop_classes(crops_directory, output_file)
-    split_dataset()
+    # split_dataset()
+    split_crops_dataset()
