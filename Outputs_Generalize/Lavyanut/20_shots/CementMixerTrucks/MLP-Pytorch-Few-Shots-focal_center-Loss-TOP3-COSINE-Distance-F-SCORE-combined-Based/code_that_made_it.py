@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from joblib import dump, load
+from PIL import Image # === NEW: Needed to read image dimensions ===
 
 import torch
 import torch.nn as nn
@@ -390,10 +391,11 @@ def main():
 
     safe_class_names =[cls.replace(" ", "_") for cls in all_classes]
 
-    X_train, y_train = [],[]
-    X_test, y_test = [],[]
+    # === NEW: Tracking paths lists for image dimensions check ===
+    X_train, y_train, train_paths = [], [],[]
+    X_test,  y_test,  test_paths  = [], [],[]
 
-    def load_features_from_dir(directory, X_list, y_list):
+    def load_features_from_dir(directory, X_list, y_list, paths_list):
         if not os.path.exists(directory):
             print(f"Warning: Directory does not exist -> {directory}")
             return
@@ -406,15 +408,16 @@ def main():
                     embedding = np.load(f).flatten()
                     X_list.append(embedding)
                     y_list.append(cls) 
+                    paths_list.append(f) # <--- Track path
                     break
 
     print("Loading 100% of Training features... (This might take a minute)")
-    load_features_from_dir(train_base_dir, X_train, y_train)
-    load_features_from_dir(train_novel_dir, X_train, y_train)
+    load_features_from_dir(train_base_dir, X_train, y_train, train_paths)
+    load_features_from_dir(train_novel_dir, X_train, y_train, train_paths)
 
     print("Loading Validation/Testing features...")
-    load_features_from_dir(val_base_dir, X_test, y_test)
-    load_features_from_dir(val_novel_dir, X_test, y_test)
+    load_features_from_dir(val_base_dir, X_test, y_test, test_paths)
+    load_features_from_dir(val_novel_dir, X_test, y_test, test_paths)
 
     X_train = np.array(X_train)
     y_train = np.array(y_train)
@@ -427,6 +430,29 @@ def main():
     if X_train.shape[0] == 0 or X_test.shape[0] == 0:
         print("Error: Training or testing data is empty. Please check your file paths.")
         return
+
+    # =========================================================================
+    # === NEW: Calculate Mean Dimensions of the few shots training objects ====
+    # =========================================================================
+    print("Calculating mean dimensions of Few-Shot Novel Class...")
+    novel_widths, novel_heights = [],[]
+    for path, cls in zip(train_paths, y_train):
+        if cls == TARGET_NOVEL_CLASS:
+            # Check parallel folder structure first, then All_Crops
+            img_path_1 = path.replace('Obj_Embs', 'Obj_Crops').replace('.npy', '.jpg')
+            img_path_2 = os.path.join(data_path, "Obj_Crops", "All_Crops", os.path.basename(path).replace('.npy', '.jpg'))
+            img_path = img_path_1 if os.path.exists(img_path_1) else img_path_2
+            
+            if os.path.exists(img_path):
+                with Image.open(img_path) as img:
+                    w, h = img.size
+                    novel_widths.append(w)
+                    novel_heights.append(h)
+
+    mean_novel_w = np.mean(novel_widths) if novel_widths else 0
+    mean_novel_h = np.mean(novel_heights) if novel_heights else 0
+    print(f"-> Few-Shot Mean Width: {mean_novel_w:.2f}, Mean Height: {mean_novel_h:.2f}\n")
+    # =========================================================================
 
     le = LabelEncoder()
     y_train_encoded = le.fit_transform(y_train)
@@ -831,6 +857,28 @@ def main():
             scores = compute_prototype_scores(X_separated_features_all, train_centers, metric=DISTANCE_METRIC)
         elif DISTANCE_METRIC == 'logits':
             scores = test_logits
+
+        # =================================================================================
+        # === NEW: Penalize Novel Class if Test Sample differs > 20% from learned Means ===
+        # =================================================================================
+        if mean_novel_w > 0 and mean_novel_h > 0:
+            novel_class_idx = le.transform([TARGET_NOVEL_CLASS])[0]
+            
+            for i, path in enumerate(test_paths):
+                # Search for the associated jpg file
+                img_path_1 = path.replace('Obj_Embs', 'Obj_Crops').replace('.npy', '.jpg')
+                img_path_2 = os.path.join(data_path, "Obj_Crops", "All_Crops", os.path.basename(path).replace('.npy', '.jpg'))
+                img_path = img_path_1 if os.path.exists(img_path_1) else img_path_2
+                
+                if os.path.exists(img_path):
+                    with Image.open(img_path) as img:
+                        w, h = img.size
+                    
+                    # If dimensions are outside the +/- 20% bounds, disqualify the Novel class
+                    if not (0.8 * mean_novel_w <= w <= 1.2 * mean_novel_w) or \
+                       not (0.8 * mean_novel_h <= h <= 1.2 * mean_novel_h):
+                        scores[i, novel_class_idx] = -float('inf') 
+        # =================================================================================
 
         y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
         y_pred_encoded = y_pred_encoded.cpu().numpy()

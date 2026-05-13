@@ -58,7 +58,7 @@ def seed_everything(seed=42):
 
 WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
 
-data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut_partial'
+data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut'
 
 # Top-K Metrics
 USE_TOP_K_METRICS = True
@@ -75,17 +75,17 @@ LOSS_COMBINATION = 'focal_center'
 CUSTOM_METRIC_TYPE = 'combined' # use 'f1_novel', 'f2_novel' or 'combined' 
 SEED = 9
 
-# BEST_HYPERPARAMETERS=None
+BEST_HYPERPARAMETERS=None
 
-BEST_HYPERPARAMETERS = {
-    "batch_size": 512,
-    "gamma": 1.7112461378820052,
-    "center_weight": 0.04043393144785676,
-    "lr": 0.002296892904961805,
-    "weight_decay": 6.314269748555762e-05,
-    "weight_smoothing": 0.7456857255549503,
-    "novel_multiplier": 1.320137299575476
-}
+# BEST_HYPERPARAMETERS = {
+#     "batch_size": 512,
+#     "gamma": 1.7112461378820052,
+#     "center_weight": 0.04043393144785676,
+#     "lr": 0.002296892904961805,
+#     "weight_decay": 6.314269748555762e-05,
+#     "weight_smoothing": 0.7456857255549503,
+#     "novel_multiplier": 1.320137299575476
+# }
 
 
 MAX_EPOCHS = 500
@@ -107,7 +107,7 @@ ALL_CLASSES = [
 'TruckTractor'
 ]
 
-TARGET_NOVEL_CLASS = 'LongHeavyDuty'
+TARGET_NOVEL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
@@ -116,9 +116,9 @@ SHOTS = 20
 
 
 
-SAVE_DIR = f"models_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models_Generalize_NEW_Lavyanut/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_Generalize_NEW_Lavyanut/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'
@@ -135,8 +135,8 @@ elif TARGET_NOVEL_CLASS == 'Forklifts':
 else:
     ALL_CLASSES.remove('ExtremelyLongHeavyDutyTraileronly')
     ALL_CLASSES.remove('Forklifts')
-    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train_{TARGET_NOVEL_CLASS}/{TARGET_NOVEL_CLASS}_{SHOTS}_shots/'
-    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test_{TARGET_NOVEL_CLASS}/novel_class_{TARGET_NOVEL_CLASS}_{SHOTS}_shots/'
+    TRAIN_NOVEL_DIR = f'{data_path}/Obj_Embs/train_{TARGET_NOVEL_CLASS.lower()}/{TARGET_NOVEL_CLASS.lower()}_{SHOTS}_shots/'
+    VAL_NOVEL_DIR   = f'{data_path}/Obj_Embs/test_{TARGET_NOVEL_CLASS.lower()}/novel_class_{TARGET_NOVEL_CLASS.lower()}_{SHOTS}_shots/'
     # raise ValueError("Unknown target class for directories!")
 
 
@@ -432,13 +432,12 @@ def main():
         return
 
     # =========================================================================
-    # === NEW: Calculate Mean Dimensions of the few shots training objects ====
+    # === UPDATED: Calculate Aspect Ratios (Shape over Absolute Size) ====
     # =========================================================================
-    print("Calculating mean dimensions of Few-Shot Novel Class...")
-    novel_widths, novel_heights = [],[]
+    print("Calculating Aspect Ratios of Few-Shot Novel Class...")
+    aspect_ratios =[]
     for path, cls in zip(train_paths, y_train):
         if cls == TARGET_NOVEL_CLASS:
-            # Check parallel folder structure first, then All_Crops
             img_path_1 = path.replace('Obj_Embs', 'Obj_Crops').replace('.npy', '.jpg')
             img_path_2 = os.path.join(data_path, "Obj_Crops", "All_Crops", os.path.basename(path).replace('.npy', '.jpg'))
             img_path = img_path_1 if os.path.exists(img_path_1) else img_path_2
@@ -446,12 +445,17 @@ def main():
             if os.path.exists(img_path):
                 with Image.open(img_path) as img:
                     w, h = img.size
-                    novel_widths.append(w)
-                    novel_heights.append(h)
+                    smaller_dim = max(min(w, h), 1) # Prevent division by zero
+                    larger_dim = max(w, h)
+                    aspect_ratios.append(larger_dim / smaller_dim)
 
-    mean_novel_w = np.mean(novel_widths) if novel_widths else 0
-    mean_novel_h = np.mean(novel_heights) if novel_heights else 0
-    print(f"-> Few-Shot Mean Width: {mean_novel_w:.2f}, Mean Height: {mean_novel_h:.2f}\n")
+    if aspect_ratios:
+        min_ar = np.min(aspect_ratios)
+        max_ar = np.max(aspect_ratios)
+    else:
+        min_ar = max_ar = 0
+        
+    print(f"-> Few-Shot Aspect Ratio (Length/Width) range: {min_ar:.2f} to {max_ar:.2f}\n")
     # =========================================================================
 
     le = LabelEncoder()
@@ -859,27 +863,77 @@ def main():
             scores = test_logits
 
         # =================================================================================
-        # === NEW: Penalize Novel Class if Test Sample differs > 20% from learned Means ===
+        # === UPDATED: Aspect Ratio Check & Positive Score Boosting =======================
         # =================================================================================
-        if mean_novel_w > 0 and mean_novel_h > 0:
+        if min_ar > 0:
             novel_class_idx = le.transform([TARGET_NOVEL_CLASS])[0]
-            
+
+            # --- Statistics Counters ---
+            total_filtered = 0
+            real_novel_filtered = 0
+            non_novel_filtered = 0
+
+            total_novel_objects = np.sum(y_test == TARGET_NOVEL_CLASS)
+
             for i, path in enumerate(test_paths):
-                # Search for the associated jpg file
                 img_path_1 = path.replace('Obj_Embs', 'Obj_Crops').replace('.npy', '.jpg')
-                img_path_2 = os.path.join(data_path, "Obj_Crops", "All_Crops", os.path.basename(path).replace('.npy', '.jpg'))
+                img_path_2 = os.path.join(
+                    data_path,
+                    "Obj_Crops",
+                    "All_Crops",
+                    os.path.basename(path).replace('.npy', '.jpg')
+                )
+
                 img_path = img_path_1 if os.path.exists(img_path_1) else img_path_2
-                
+
                 if os.path.exists(img_path):
                     with Image.open(img_path) as img:
                         w, h = img.size
-                    
-                    # If dimensions are outside the +/- 20% bounds, disqualify the Novel class
-                    if not (0.8 * mean_novel_w <= w <= 1.2 * mean_novel_w) or \
-                       not (0.8 * mean_novel_h <= h <= 1.2 * mean_novel_h):
-                        scores[i, novel_class_idx] = -float('inf') 
-        # =================================================================================
 
+                    smaller_dim = max(min(w, h), 1)
+                    larger_dim = max(w, h)
+                    current_ar = larger_dim / smaller_dim
+
+                    # Check if the shape matches the novel class geometry
+                    is_trailer_shape = (0.9 * min_ar) <= current_ar <= (1.1 * max_ar)
+
+                    if not is_trailer_shape:
+
+                        # ---------------------------------------------------------
+                        # Count filtered samples
+                        # ---------------------------------------------------------
+                        total_filtered += 1
+
+                        if y_test[i] == TARGET_NOVEL_CLASS:
+                            real_novel_filtered += 1
+                        else:
+                            non_novel_filtered += 1
+
+                        # Disqualify novel prediction
+                        scores[i, novel_class_idx] = -float('inf')
+
+                    else:
+                        # Optional positive boost
+                        scores[i, novel_class_idx] += 0.0
+
+            # =========================================================================
+            # Print Statistics
+            # =========================================================================
+            print("\n" + "=" * 60)
+            print("ASPECT RATIO FILTER STATISTICS")
+            print("=" * 60)
+
+            print(f"Total filtered samples              : {total_filtered}")
+            print(f"Real novel objects filtered OUT    : {real_novel_filtered}")
+            print(f"Non-novel objects filtered OUT     : {non_novel_filtered}")
+            print(f"Total novel objects in test set    : {total_novel_objects}")
+
+            if total_novel_objects > 0:
+                novel_filter_rate = 100.0 * real_novel_filtered / total_novel_objects
+                print(f"Novel objects wrongly rejected     : {novel_filter_rate:.2f}%")
+
+            print("=" * 60)
+        # =================================================================================
         y_pred_encoded = get_predictions(scores, y_test_tensor, top_k=TOP_K_VALUE, use_top_k=USE_TOP_K_METRICS)
         y_pred_encoded = y_pred_encoded.cpu().numpy()
         X_separated_features_all = X_separated_features_all.cpu().numpy()

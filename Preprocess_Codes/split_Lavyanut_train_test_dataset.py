@@ -14,7 +14,7 @@ BASE_OUTPUT_DIR = "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/"
 SHOTS = 20
 
 # Sanitized Novel Class Name (after spaces, commas, and hyphens are removed)
-NOVEL_CEMENT = "HeavyDuty"
+NOVEL_CEMENT = "LongHeavyDuty"
 
 # Define Target Directories
 TRAIN_BASE_DIR = os.path.join(BASE_OUTPUT_DIR, f"train_{NOVEL_CEMENT}/base_class")
@@ -375,5 +375,5 @@ if __name__ == "__main__":
     # output_file = "/home/adamm/Documents/FSOD/Data/Lavyanut/class_counts.txt"
 
     # count_crop_classes(crops_directory, output_file)
-    # split_dataset()
-    split_crops_dataset()
+    split_dataset()
+    # split_crops_dataset()

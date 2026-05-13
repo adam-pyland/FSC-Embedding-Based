@@ -1,0 +1,25 @@
+========================================
+PREDICTION-BASED TOP-K STATISTICS
+Target Class Evaluated: LongHeavyDuty
+========================================
+
+--- TOP-1 Category ---
+Total objects scored into this category: 80
+Objects actually belonging to ground truth 'LongHeavyDuty': 72
+Accuracy (Real / Total) within category: 90.00%
+
+--- TOP-2 Category ---
+Total objects scored into this category: 21
+Objects actually belonging to ground truth 'LongHeavyDuty': 5
+Accuracy (Real / Total) within category: 23.81%
+
+--- TOP-3 Category ---
+Total objects scored into this category: 18
+Objects actually belonging to ground truth 'LongHeavyDuty': 1
+Accuracy (Real / Total) within category: 5.56%
+
+--- Not in TOP-3 Category ---
+Total objects scored into this category: 709
+Objects actually belonging to ground truth 'LongHeavyDuty': 1
+Accuracy (Real / Total) within category: 0.14%
+
