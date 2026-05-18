@@ -375,5 +375,5 @@ if __name__ == "__main__":
     # output_file = "/home/adamm/Documents/FSOD/Data/Lavyanut/class_counts.txt"
 
     # count_crop_classes(crops_directory, output_file)
-    split_dataset()
-    # split_crops_dataset()
+    # split_dataset()
+    split_crops_dataset()
