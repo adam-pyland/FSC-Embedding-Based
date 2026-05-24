@@ -1,0 +1,14 @@
+Bulldozers: 215
+CementMixerTrucks: 152
+ExtremelyLongHeavyDuty: 19
+ExtremelyLongHeavyDutyTraileronly: 106
+Forklifts: 32
+HeavyDuty: 532
+HeavyDutyTractorTruck: 1
+LongHeavyDuty: 582
+MediumSmall: 1594
+MediumStandard: 1837
+MobileCranes: 96
+Other: 255
+Small: 3868
+TruckTractor: 549

@@ -61,8 +61,8 @@ WORK_PLACE = 'matrix' # The place where I am working in: 'yehud' or 'matrix'
 data_path = r'C:\Adams\FSOD\Data\Lavyanut\Lavyanut' if WORK_PLACE is 'yehud' else '/home/adamm/Documents/FSOD/Data/Lavyanut_partial'
 
 # Top-K Metrics
-USE_TOP_K_METRICS = True
-TOP_K_VALUE = 3
+USE_TOP_K_METRICS = False
+TOP_K_VALUE = 1
 
 # Prediction & Distance Metrics
 # Options: 'l2' (Euclidean), 'cosine' (Cosine similarity), or 'logits' (MLP Output Scores)
@@ -107,7 +107,7 @@ ALL_CLASSES = [
 'TruckTractor'
 ]
 
-TARGET_NOVEL_CLASS = 'LongHeavyDuty'
+TARGET_NOVEL_CLASS = 'ExtremelyLongHeavyDutyTraileronly'
 VISUALIZATION_SOURCE = 'train'
 
 Dataset_Name = 'Lavyanut'
@@ -116,9 +116,9 @@ SHOTS = 20
 
 
 
-SAVE_DIR = f"models_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+SAVE_DIR = f"models_Generalize36/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 
-PLOT_DIR = f"Outputs_Generalize/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
+PLOT_DIR = f"Outputs_Generalize36/{Dataset_Name}/{SHOTS}_shots/{TARGET_NOVEL_CLASS}/MLP-Pytorch-Few-Shots-{LOSS_COMBINATION}-Loss-TOP{TOP_K_VALUE if USE_TOP_K_METRICS else 1}-{DISTANCE_METRIC.upper()}-{'Distance' if DISTANCE_METRIC != 'logits' else 'Logits'}-F-SCORE-{CUSTOM_METRIC_TYPE}-Based"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 TRAIN_BASE_DIR  = f'{data_path}/Obj_Embs/train/base_class/'

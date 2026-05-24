@@ -1,24 +1,48 @@
 import os
-from glob import glob
+import shutil
+from collections import Counter
 
-dirs = [
-    "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/test_cementmixertrucks/base_class/",
-    "/home/adamm/Documents/FSOD/Data/Lavyanut_partial/Obj_Embs/test_cementmixertrucks/novel_class_cementmixertrucks_20_shots/"
-]
+def count_objects_by_class(crops_dir, output_file="class_counts.txt"):
+    class_counts = Counter()
 
-image_names = set()
+    for filename in os.listdir(crops_dir):
+        if not os.path.isfile(os.path.join(crops_dir, filename)):
+            continue
 
-for d in dirs:
-    npy_files = glob(os.path.join(d, "*.npy"))
+        name = os.path.splitext(filename)[0]
+        obj_class = name.rsplit("_", 1)[0].split("_")[-1]
+        class_counts[obj_class] += 1
 
-    for f in npy_files:
-        filename = os.path.basename(f)
+    with open(output_file, "w") as f:
+        for cls, count in sorted(class_counts.items()):
+            f.write(f"{cls}: {count}\n")
 
-        # Split from the right:
-        # image_name__class_name_objectid.npy
-        left_part = filename.rsplit("_", 1)[0]   # remove object id
-        image_name = left_part.split("__")[0]    # keep image name only
+    print(f"Saved counts to: {os.path.abspath(output_file)}")
 
-        image_names.add(image_name)
+def organize_crops_by_class(base_dir):
+    crops_dir = os.path.join(base_dir, "Obj_Crops")
+    output_dir = os.path.join(base_dir, "Obj_Crops_Organized")
 
-print(f"Number of unique images: {len(image_names)}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    for filename in os.listdir(crops_dir):
+        src_path = os.path.join(crops_dir, filename)
+
+        if not os.path.isfile(src_path):
+            continue
+
+        name = os.path.splitext(filename)[0]
+        obj_class = name.rsplit("_", 1)[0].split("_")[-1]
+
+        class_dir = os.path.join(output_dir, obj_class)
+        os.makedirs(class_dir, exist_ok=True)
+
+        shutil.copy2(src_path, os.path.join(class_dir, filename))
+
+    print(f"Organized crops saved in: {output_dir}")
+
+# Example
+crops_dir = "/home/adamm/Documents/FSOD/Data/Lavyanut/Images/train/Obj_Crops/"
+# count_objects_by_class(crops_dir)
+base_dir = "/home/adamm/Documents/FSOD/Data/Lavyanut/Images/train/"
+organize_crops_by_class(base_dir)
